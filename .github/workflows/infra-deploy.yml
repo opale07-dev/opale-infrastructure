@@ -28,7 +28,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
         run: |
           terraform init \
-            -backend-config="endpoint=https://ext-s3.pub.infomaniak.cloud" \
+            -backend-config="endpoint=https://s3.pub1.infomaniak.cloud" \
             -backend-config="skip_requesting_account_id=true" \
             -backend-config="skip_credentials_validation=true" \
             -backend-config="skip_region_validation=true" \

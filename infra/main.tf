@@ -11,7 +11,7 @@ terraform {
   backend "s3" {
     bucket                      = "opale-core-tfstate"
     key                         = "prod/terraform.tfstate"
-    region                      = "ch-gva"
+    region                      = "us-east-1"
   }
 }
 
