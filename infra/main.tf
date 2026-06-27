@@ -12,7 +12,9 @@ terraform {
     bucket                      = "opale-core-tfstate"
     key                         = "prod/terraform.tfstate"
     region                      = "ch-gva"
-    endpoint                    = "https://s3.infomaniak.com" # URL brute de l'API Infomaniak
+    endpoints {
+      s3 = "https://ext-s3.pub.infomaniak.cloud" # Endpoint officiel Public Cloud S3 (Genève ch-gva)
+    }
     use_path_style              = true 
     
     # Sécurités indispensables pour court-circuiter AWS Amazon
