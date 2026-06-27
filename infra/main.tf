@@ -21,8 +21,8 @@ provider "openstack" {
 }
 
 # 1. Récupération de l'image Ubuntu 24.04
-data "openstack_images_image_v2" "ubuntu" {
-  name        = "Ubuntu 24.04 LTS" # Vérifie le nom exact dans ton manager si besoin
+data "openstack_images_image_v2" "alpine" {
+  name        = "Alpine Linux 3" # Vérifie le nom exact dans ton manager si besoin
   most_recent = true
 }
 
@@ -36,9 +36,19 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 resource "openstack_compute_instance_v2" "opale_vault" {
   name            = "opale-vault-prod"
   image_id        = data.openstack_images_image_v2.ubuntu.id
-  flavor_name     = "a1-ram2" # 1 vCPU / 2 Go RAM
+  flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = ["default"]
+
+  # Injection dynamique des arguments spécifiques à cette instance
+  user_data = <<-EOF
+    #!/bin/sh
+    # Téléchargement ou exécution du script générique
+    sh ${path.module}/scripts/harden-alpine-generic.sh \
+      --ssh-port 22 \
+      --app-port 8200 \
+      --app-dir /opt/opale-vault
+  EOF
 
   # C'est ici qu'on force OpenStack à émuler la puce TPM 2.0 pour le Vault
   metadata = {
