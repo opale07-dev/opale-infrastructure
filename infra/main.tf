@@ -8,10 +8,10 @@ terraform {
   }
 
   # Configuration du stockage d'état souverain chez Infomaniak
-  backend "swift" {
-    container    = "opale-core-tfstate"
-    archive_key  = "prod/terraform.tfstate"
-    region_name  = "ch-gva" # La région officielle de ton Public Cloud Infomaniak
+  backend "s3" {
+    bucket = "opale-core-tfstate"
+    key    = "prod/terraform.tfstate"
+    region = "us-east-1"
   }
 }
 
