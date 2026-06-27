@@ -1,0 +1,56 @@
+# macOS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+node_modules/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets and keys
+*.pem
+*.key
+*.p8
+*.p12
+*.crt
+*.csr
+id_rsa
+id_ed25519
+*.agekey
+*.sops.yaml
+secrets.yaml
+secrets.*.yaml
+decrypted-*.yaml
+
+# Data / generated artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.backup
+*.parquet
+*.log
+logs/
+tmp/
+dist/
+build/
+coverage/
+
+# Docker / local runtime
+docker-compose.override.yml
+.docker/
+
+# Tool output
+reports/
+audit-output/
+sbom/
