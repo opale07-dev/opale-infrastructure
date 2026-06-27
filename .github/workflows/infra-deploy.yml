@@ -27,8 +27,14 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
         run: |
-          terraform init /
-            -backend-config="endpoint=https://s3.pub1.infomaniak.cloud"
+          terraform init \
+            -backend-config="endpoint=https://s3.pub1.infomaniak.cloud" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_s3_checksum=true" \
+            -backend-config="force_path_style=true"
         working-directory: ./infra
 
       - name: Terraform Plan
