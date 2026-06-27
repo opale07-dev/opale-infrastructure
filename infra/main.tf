@@ -12,7 +12,7 @@ terraform {
     bucket                      = "opale-core-tfstate"
     key                         = "prod/terraform.tfstate"
     region                      = "ch-gva" # Région Genève d'Infomaniak
-    endpoint                    = "https://s3.infomaniak.com" # URL S3 de la région Genève d'Infomaniak
+    endpoints.s3                = "https://s3.infomaniak.com" # URL S3 de la région Genève d'Infomaniak
     skip_credentials_validation = true
     skip_region_validation      = true
     skip_metadata_api_check     = true
