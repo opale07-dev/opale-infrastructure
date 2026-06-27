@@ -20,7 +20,7 @@ provider "openstack" {
   # Les identifiants seront injectés via tes variables d'environnement OpenRC
 }
 
-# 1. Récupération de l'image Ubuntu 24.04
+# 1. Récupération de l'image Alpine
 data "openstack_images_image_v2" "alpine" {
   name        = "Alpine Linux 3" # Vérifie le nom exact dans ton manager si besoin
   most_recent = true
@@ -35,7 +35,7 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 # 3. Création de l'instance avec activation du vTPM
 resource "openstack_compute_instance_v2" "opale_vault" {
   name            = "opale-vault-prod"
-  image_id        = data.openstack_images_image_v2.ubuntu.id
+  image_id        = data.openstack_images_image_v2.alpine.id
   flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = ["default"]
