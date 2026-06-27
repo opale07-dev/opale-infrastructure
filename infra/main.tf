@@ -12,17 +12,6 @@ terraform {
     bucket                      = "opale-core-tfstate"
     key                         = "prod/terraform.tfstate"
     region                      = "ch-gva"
-    endpoints {
-      s3 = "https://ext-s3.pub.infomaniak.cloud" # Endpoint officiel Public Cloud S3 (Genève ch-gva)
-    }
-    use_path_style              = true 
-    
-    # Sécurités indispensables pour court-circuiter AWS Amazon
-    skip_requesting_account_id  = true
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_metadata_api_check     = true
-    skip_s3_checksum            = true
   }
 }
 
