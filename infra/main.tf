@@ -11,12 +11,16 @@ terraform {
   backend "s3" {
     bucket                      = "opale-core-tfstate"
     key                         = "prod/terraform.tfstate"
-    region                      = "ch-gva" # Région Genève d'Infomaniak
-    endpoints.s3                = "https://s3.infomaniak.com" # URL S3 de la région Genève d'Infomaniak
+    region                      = "ch-gva"
+    endpoint                    = "https://s3.infomaniak.com" # URL brute de l'API Infomaniak
+    use_path_style              = true 
+    
+    # Sécurités indispensables pour court-circuiter AWS Amazon
+    skip_requesting_account_id  = true
     skip_credentials_validation = true
     skip_region_validation      = true
     skip_metadata_api_check     = true
-    force_path_style            = true # Requis pour la compatibilité OpenStack Swift / S3
+    skip_s3_checksum            = true
   }
 }
 
