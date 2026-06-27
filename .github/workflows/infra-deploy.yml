@@ -64,8 +64,20 @@ jobs:
         run: terraform apply -auto-approve
         working-directory: ./infra
 
-      - name: 👀 Reveal Project SSH Key
-        run: terraform output -raw private_key
+      - name: 🔐 Securely Push SSH Key to Application Secrets
+        uses: gliech/create-github-secret-action@v1
+        with:
+          # Le Personal Access Token (PAT) que tu as créé au début
+          token: ${{ secrets.OPALE_GLOBAL_PAT }}
+          # Le dépôt cible où injecter la clé privée
+          repository: ton-username/opale-vault
+          # Le nom du secret à créer ou mettre à jour dans opale-vault
+          name: SSH_PRIVATE_KEY
+          # La valeur récupérée directement de Terraform sans passer par les logs
+          value: ${{ steps.get_key.outputs.key }}
+        vars:
+          # Étape intermédiaire pour extraire la valeur Terraform de manière masquée
+          key: $(terraform output -raw private_key)
 
       - name: Trigger Opale Vault Deployment
         uses: peter-evans/repository-dispatch@v3
