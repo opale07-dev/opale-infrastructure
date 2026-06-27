@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'infra/**' # Se déclenche uniquement si des changements sont faits dans le dossier infra
+  workflow_dispatch: 
 
 jobs:
   terraform:
