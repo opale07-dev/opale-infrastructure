@@ -57,6 +57,6 @@ resource "openstack_compute_instance_v2" "opale_vault" {
   }
 
   network {
-    name = "Ext-Net" # Le nom du réseau public chez Infomaniak pour avoir une IP
+    name = "ext-net1" # Le nom du réseau public chez Infomaniak pour avoir une IP
   }
 }
