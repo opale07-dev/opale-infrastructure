@@ -28,7 +28,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
         run: |
           terraform init /
-          -backend-config='endpoints={s3="https://s3.pub1.infomaniak.cloud"}'
+            -backend-config="endpoint=https://s3.pub1.infomaniak.cloud"
     
         working-directory: ./infra
 
