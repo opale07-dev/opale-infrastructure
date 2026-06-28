@@ -28,7 +28,7 @@ data "openstack_images_image_v2" "alpine" {
 
 # 2. Définition de la clé SSH pour l'accès bare-metal
 resource "openstack_compute_keypair_v2" "opale_key" {
-  name       = "opale-core-key"
+  name       = "opale-vault-key"
   public_key = var.ssh_public_key
 }
 
