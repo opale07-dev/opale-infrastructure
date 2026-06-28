@@ -60,3 +60,25 @@ resource "openstack_compute_instance_v2" "opale_vault" {
     name = "ext-net1" # Le nom du réseau public chez Infomaniak pour avoir une IP
   }
 }
+
+# Définition du Groupe de Sécurité durci
+resource "openstack_compute_secgroup_v2" "secgroup_opale" {
+  name        = "opale-vault-secgroup"
+  description = "Security group for Opale Vault (Restricted SSH and Vault)"
+
+  # Règle pour le SSH (Port 2222) - Reste ouvert à tous ou à restreindre aussi
+  rule {
+    from_port   = 2222
+    to_port     = 2222
+    ip_protocol = "tcp"
+    cidr        = "0.0.0.0/0" 
+  }
+
+  # Règle restrictive pour le Vault (Port 8443)
+  rule {
+    from_port   = 8443
+    to_port     = 8443
+    ip_protocol = "tcp"
+    cidr        = "144.24.253.255/32" # Le /32 indique que seule cette IP exacte est autorisée
+  }
+}
