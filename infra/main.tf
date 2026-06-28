@@ -16,10 +16,10 @@ terraform {
 }
 
 locals {
-  ssh_port            = 2222
+  ssh_port           = 2222
   vault_internal_port = 8443
-  service_name        = "opale-vault"
-  environment         = "prod"
+  service_name       = "opale-vault"
+  environment        = "prod"
 }
 
 # Configuration du Provider (Infomaniak utilise OpenStack)
@@ -27,9 +27,9 @@ provider "openstack" {
   # Les identifiants seront injectés via tes variables d'environnement OpenRC
 }
 
-# 1. Récupération de l'image cloud-init compatible pour le backend Vault
-data "openstack_images_image_v2" "ubuntu" {
-  name        = "Ubuntu 24.04 LTS Noble Numbat"
+# 1. Récupération de l'image Alpine
+data "openstack_images_image_v2" "alpine" {
+  name        = "Alpine Linux 3" # Vérifie le nom exact dans ton manager si besoin
   most_recent = true
 }
 
@@ -42,7 +42,7 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 # 3. Création de l'instance avec activation du vTPM
 resource "openstack_compute_instance_v2" "opale_vault" {
   name            = "${local.service_name}-${local.environment}"
-  image_id        = data.openstack_images_image_v2.ubuntu.id
+  image_id        = data.openstack_images_image_v2.alpine.id
   flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
@@ -54,69 +54,30 @@ resource "openstack_compute_instance_v2" "opale_vault" {
   # Bootstrap inline so the VM can actually execute the hardening baseline at first boot.
   user_data = <<-EOF
     #!/bin/sh
-    cat >/root/harden-ubuntu-vault-host.sh <<'SCRIPT'
-${file("${path.module}/../scripts/harden-ubuntu-vault-host.sh")}
+    cat >/root/harden-alpine-vps.sh <<'SCRIPT'
+${file("${path.module}/../scripts/harden-alpine-vps.sh")}
 SCRIPT
     cat >/root/opale-vault-sync.sh <<'SCRIPT'
 ${file("${path.module}/../scripts/opale-vault-sync.sh")}
 SCRIPT
-    chmod 700 /root/harden-ubuntu-vault-host.sh
+    chmod 700 /root/harden-alpine-vps.sh
     chmod 700 /root/opale-vault-sync.sh
-    /bin/bash /root/harden-ubuntu-vault-host.sh \
+    /bin/sh /root/harden-alpine-vps.sh \
       --ssh-port ${local.ssh_port} \
       --app-port ${local.vault_internal_port} \
-      --allowed-ssh-cidr ${var.admin_cidr} \
-      --allowed-app-cidr ${var.vault_allowed_cidr} \
-      --admin-user ubuntu \
       --app-dir /opt/opale-vault
     install -m 700 /root/opale-vault-sync.sh /usr/local/bin/opale-vault-sync
-    mkdir -p /opt/opale-vault
-    cat >/etc/systemd/system/opale-vault-sync.service <<'SCRIPT'
-[Unit]
-Description=Opale Vault pull-based sync
-After=network-online.target docker.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/opale-vault-sync
-
-[Install]
-WantedBy=multi-user.target
-SCRIPT
-    cat >/etc/systemd/system/opale-vault-sync.timer <<'SCRIPT'
-[Unit]
-Description=Periodic Opale Vault pull-based sync
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=15min
-Unit=opale-vault-sync.service
-
-[Install]
-WantedBy=timers.target
-SCRIPT
-    cat >/usr/local/bin/opale-vault-first-sync <<'SCRIPT'
+    mkdir -p /etc/local.d /etc/periodic/15min /opt/opale-vault
+    cat >/etc/local.d/opale-vault-sync.start <<'SCRIPT'
 #!/bin/sh
-/usr/local/bin/opale-vault-sync >>/var/log/opale-vault-sync.log 2>&1 || true
+/usr/local/bin/opale-vault-sync >>/var/log/opale-vault-sync.log 2>&1 &
 SCRIPT
-    chmod 755 /usr/local/bin/opale-vault-first-sync
-    cat >/etc/systemd/system/opale-vault-first-sync.service <<'SCRIPT'
-[Unit]
-Description=Initial Opale Vault sync attempt
-After=network-online.target docker.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/opale-vault-first-sync
-
-[Install]
-WantedBy=multi-user.target
+    cat >/etc/periodic/15min/opale-vault-sync <<'SCRIPT'
+#!/bin/sh
+/usr/local/bin/opale-vault-sync >>/var/log/opale-vault-sync.log 2>&1
 SCRIPT
-    systemctl daemon-reload
-    systemctl enable opale-vault-sync.timer opale-vault-first-sync.service
-    systemctl start opale-vault-sync.timer opale-vault-first-sync.service || true
+    chmod 755 /etc/local.d/opale-vault-sync.start /etc/periodic/15min/opale-vault-sync
+    rc-update add local default
     cat >/opt/opale-vault/deploy.env <<'SCRIPT'
 # Fill this file once on the VM, then the backend deployment is pull-based and autonomous.
 GITHUB_DEPLOY_USER=
