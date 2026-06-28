@@ -69,13 +69,16 @@ resource "openstack_compute_secgroup_v2" "secgroup_opale" {
   description = "Security group for Opale Vault (Restricted SSH and Vault)"
 
   dynamic "rule" {
-    for_each = trimspace(var.bootstrap_cidr) == "" ? [] : [var.bootstrap_cidr]
+    for_each = trimspace(var.bootstrap_cidr) == "" ? [] : [
+      local.bootstrap_ssh_port,
+      local.ssh_port,
+    ]
 
     content {
-      from_port   = local.bootstrap_ssh_port
-      to_port     = local.bootstrap_ssh_port
+      from_port   = rule.value
+      to_port     = rule.value
       ip_protocol = "tcp"
-      cidr        = rule.value
+      cidr        = var.bootstrap_cidr
     }
   }
 
