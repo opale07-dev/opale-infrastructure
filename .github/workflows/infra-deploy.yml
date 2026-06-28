@@ -23,9 +23,24 @@ jobs:
         env:
           ADMIN_CIDR: ${{ secrets.ADMIN_CIDR }}
           VAULT_ALLOWED_CIDR: ${{ secrets.VAULT_ALLOWED_CIDR }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GITHUB_DEPLOY_PAT: ${{ secrets.OPALE_GLOBAL_PAT }}
+          VAULT_ADMIN_PUBKEYS: ${{ secrets.VAULT_ADMIN_PUBKEYS }}
         run: |
           test -n "$ADMIN_CIDR" || { echo "Missing required secret: ADMIN_CIDR"; exit 1; }
           test -n "$VAULT_ALLOWED_CIDR" || { echo "Missing required secret: VAULT_ALLOWED_CIDR"; exit 1; }
+          test -n "$SSH_PUBLIC_KEY" || { echo "Missing required secret: SSH_PUBLIC_KEY"; exit 1; }
+          test -n "$SSH_PRIVATE_KEY" || { echo "Missing required secret: SSH_PRIVATE_KEY"; exit 1; }
+          test -n "$GITHUB_DEPLOY_PAT" || { echo "Missing required secret: OPALE_GLOBAL_PAT"; exit 1; }
+          test -n "$VAULT_ADMIN_PUBKEYS" || { echo "Missing required secret: VAULT_ADMIN_PUBKEYS"; exit 1; }
+
+      - name: Resolve runner bootstrap CIDR
+        id: runner_ip
+        run: |
+          RUNNER_IP="$(curl -4 -fsS https://api.ipify.org)"
+          echo "cidr=${RUNNER_IP}/32" >> "$GITHUB_OUTPUT"
+          echo "Bootstrap SSH will be temporarily allowed from ${RUNNER_IP}/32"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -63,10 +78,11 @@ jobs:
           TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
           TF_VAR_admin_cidr: ${{ secrets.ADMIN_CIDR }}
           TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
+          TF_VAR_bootstrap_cidr: ${{ steps.runner_ip.outputs.cidr }}
         run: terraform plan
         working-directory: ./infra
 
-      - name: Terraform Apply
+      - name: Terraform Apply with temporary bootstrap SSH
         if: github.ref == 'refs/heads/main'
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
@@ -83,6 +99,7 @@ jobs:
           TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
           TF_VAR_admin_cidr: ${{ secrets.ADMIN_CIDR }}
           TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
+          TF_VAR_bootstrap_cidr: ${{ steps.runner_ip.outputs.cidr }}
         run: terraform apply -auto-approve
         working-directory: ./infra
 
@@ -96,7 +113,81 @@ jobs:
           echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
         working-directory: ./infra
 
+      - name: Bootstrap Alpine backend over SSH
+        if: github.ref == 'refs/heads/main'
+        env:
+          TARGET_IP: ${{ steps.get_ip.outputs.ip }}
+          BOOTSTRAP_SSH_USER: ${{ vars.BOOTSTRAP_SSH_USER || 'alpine' }}
+          VAULT_ADMIN_USER: ${{ vars.VAULT_ADMIN_USER || vars.BOOTSTRAP_SSH_USER || 'alpine' }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GITHUB_DEPLOY_USER: ${{ vars.GHCR_DEPLOY_USER || github.actor }}
+          GITHUB_DEPLOY_PAT: ${{ secrets.OPALE_GLOBAL_PAT }}
+          VAULT_ADMIN_PUBKEYS: ${{ secrets.VAULT_ADMIN_PUBKEYS }}
+          VAULT_TPM_NV_INDEX: ${{ secrets.VAULT_TPM_NV_INDEX || '0x1500016' }}
+          VAULT_RUN_SYNC: ${{ vars.VAULT_RUN_SYNC || 'false' }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/opale_vault_bootstrap
+          chmod 600 ~/.ssh/opale_vault_bootstrap
+
+          {
+            printf 'GITHUB_DEPLOY_USER=%s\n' "$GITHUB_DEPLOY_USER"
+            printf 'GITHUB_DEPLOY_PAT=%s\n' "$GITHUB_DEPLOY_PAT"
+            printf 'VAULT_ADMIN_PUBKEYS=%s\n' "$VAULT_ADMIN_PUBKEYS"
+            printf 'VAULT_TPM_NV_INDEX=%s\n' "$VAULT_TPM_NV_INDEX"
+          } > /tmp/deploy.env
+          chmod 600 /tmp/deploy.env
+
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -i ~/.ssh/opale_vault_bootstrap"
+
+          echo "Waiting for initial Alpine SSH on ${TARGET_IP}:22"
+          for attempt in $(seq 1 30); do
+            if ssh $SSH_OPTS -p 22 "${BOOTSTRAP_SSH_USER}@${TARGET_IP}" 'true'; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "Initial SSH on ${TARGET_IP}:22 did not become reachable"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          scp $SSH_OPTS -P 22 \
+            scripts/harden-alpine-vps.sh \
+            scripts/opale-vault-sync.sh \
+            scripts/bootstrap-alpine-vault.sh \
+            /tmp/deploy.env \
+            "${BOOTSTRAP_SSH_USER}@${TARGET_IP}:/tmp/"
+
+          ssh $SSH_OPTS -p 22 "${BOOTSTRAP_SSH_USER}@${TARGET_IP}" \
+            "if [ \$(id -u) -eq 0 ]; then VAULT_RUN_SYNC=${VAULT_RUN_SYNC} VAULT_ADMIN_USER=${VAULT_ADMIN_USER} /bin/sh /tmp/bootstrap-alpine-vault.sh; elif command -v doas >/dev/null 2>&1; then doas env VAULT_RUN_SYNC=${VAULT_RUN_SYNC} VAULT_ADMIN_USER=${VAULT_ADMIN_USER} /bin/sh /tmp/bootstrap-alpine-vault.sh; elif command -v sudo >/dev/null 2>&1; then sudo env VAULT_RUN_SYNC=${VAULT_RUN_SYNC} VAULT_ADMIN_USER=${VAULT_ADMIN_USER} /bin/sh /tmp/bootstrap-alpine-vault.sh; else su -c 'VAULT_RUN_SYNC=${VAULT_RUN_SYNC} VAULT_ADMIN_USER=${VAULT_ADMIN_USER} /bin/sh /tmp/bootstrap-alpine-vault.sh'; fi"
+
+          rm -f /tmp/deploy.env ~/.ssh/opale_vault_bootstrap
+
+      - name: Close temporary bootstrap SSH
+        if: github.ref == 'refs/heads/main' && always() && steps.get_ip.outputs.ip != ''
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_admin_cidr: ${{ secrets.ADMIN_CIDR }}
+          TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
+          TF_VAR_bootstrap_cidr: ""
+        run: terraform apply -auto-approve
+        working-directory: ./infra
+
       - name: Summarize backend bootstrap
         run: |
           echo "Vault backend VM ready at ${{ steps.get_ip.outputs.ip }}"
-          echo "Next step: populate /opt/opale-vault/deploy.env once, then run /usr/local/bin/opale-vault-sync on the VM."
+          echo "Temporary bootstrap SSH has been closed by Terraform."

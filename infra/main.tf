@@ -16,10 +16,11 @@ terraform {
 }
 
 locals {
-  ssh_port           = 2222
+  bootstrap_ssh_port  = 22
+  ssh_port            = 2222
   vault_internal_port = 8443
-  service_name       = "opale-vault"
-  environment        = "prod"
+  service_name        = "opale-vault"
+  environment         = "prod"
 }
 
 # Configuration du Provider (Infomaniak utilise OpenStack)
@@ -51,43 +52,6 @@ resource "openstack_compute_instance_v2" "opale_vault" {
     create_before_destroy = true
   }
 
-  # Bootstrap inline so the VM can actually execute the hardening baseline at first boot.
-  user_data = <<-EOF
-    #!/bin/sh
-    cat >/root/harden-alpine-vps.sh <<'SCRIPT'
-${file("${path.module}/../scripts/harden-alpine-vps.sh")}
-SCRIPT
-    cat >/root/opale-vault-sync.sh <<'SCRIPT'
-${file("${path.module}/../scripts/opale-vault-sync.sh")}
-SCRIPT
-    chmod 700 /root/harden-alpine-vps.sh
-    chmod 700 /root/opale-vault-sync.sh
-    /bin/sh /root/harden-alpine-vps.sh \
-      --ssh-port ${local.ssh_port} \
-      --app-port ${local.vault_internal_port} \
-      --app-dir /opt/opale-vault
-    install -m 700 /root/opale-vault-sync.sh /usr/local/bin/opale-vault-sync
-    mkdir -p /etc/local.d /etc/periodic/15min /opt/opale-vault
-    cat >/etc/local.d/opale-vault-sync.start <<'SCRIPT'
-#!/bin/sh
-/usr/local/bin/opale-vault-sync >>/var/log/opale-vault-sync.log 2>&1 &
-SCRIPT
-    cat >/etc/periodic/15min/opale-vault-sync <<'SCRIPT'
-#!/bin/sh
-/usr/local/bin/opale-vault-sync >>/var/log/opale-vault-sync.log 2>&1
-SCRIPT
-    chmod 755 /etc/local.d/opale-vault-sync.start /etc/periodic/15min/opale-vault-sync
-    rc-update add local default
-    cat >/opt/opale-vault/deploy.env <<'SCRIPT'
-# Fill this file once on the VM, then the backend deployment is pull-based and autonomous.
-GITHUB_DEPLOY_USER=
-GITHUB_DEPLOY_PAT=
-VAULT_ADMIN_PUBKEYS=
-VAULT_TPM_NV_INDEX=0x1500016
-SCRIPT
-    chmod 600 /opt/opale-vault/deploy.env
-  EOF
-
   # C'est ici qu'on force OpenStack à émuler la puce TPM 2.0 pour le Vault
   metadata = {
     "hw_tpm_version" = "2.0"
@@ -103,6 +67,17 @@ SCRIPT
 resource "openstack_compute_secgroup_v2" "secgroup_opale" {
   name        = "${local.service_name}-secgroup"
   description = "Security group for Opale Vault (Restricted SSH and Vault)"
+
+  dynamic "rule" {
+    for_each = trimspace(var.bootstrap_cidr) == "" ? [] : [var.bootstrap_cidr]
+
+    content {
+      from_port   = local.bootstrap_ssh_port
+      to_port     = local.bootstrap_ssh_port
+      ip_protocol = "tcp"
+      cidr        = rule.value
+    }
+  }
 
   # Hardened SSH admin port restricted to a trusted CIDR.
   rule {
