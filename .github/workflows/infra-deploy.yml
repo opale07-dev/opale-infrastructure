@@ -72,7 +72,7 @@ jobs:
           PRIVATE_KEY=$(terraform output -raw private_key)
           
           # 2. On l'injecte directement dans les secrets du repo applicatif sans l'afficher
-          echo "$PRIVATE_KEY" | gh secret set SSH_PRIVATE_KEY --repo opale07-dev/opale-vault
+          echo "$PRIVATE_KEY" | gh secret set SSH_PRIVATE_KEY --repo opale07-dev/opale-core
 
       - name: Trigger Opale Vault Deployment
         uses: peter-evans/repository-dispatch@v3
