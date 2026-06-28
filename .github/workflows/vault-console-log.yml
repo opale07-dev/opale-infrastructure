@@ -1,0 +1,39 @@
+name: "Vault VM Console Log"
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_name:
+        description: "OpenStack server name"
+        required: true
+        default: "opale-vault-prod"
+        type: string
+      lines:
+        description: "Number of console log lines"
+        required: true
+        default: "200"
+        type: string
+
+jobs:
+  console-log:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install OpenStack Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      - name: Read VM console log
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          openstack console log show "${{ github.event.inputs.server_name }}" --lines "${{ github.event.inputs.lines }}"
