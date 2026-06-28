@@ -77,6 +77,12 @@ jobs:
           # Nettoyage immédiat du fichier temporaire
           rm private_key.pem
 
+      - name: Get Instance IP from Terraform
+        id: get_ip
+        run: |
+          IP_ADDRESS=$(terraform output -raw instance_ip)
+          echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
+
       - name: Trigger Opale Vault Deployment
         uses: peter-evans/repository-dispatch@v3
         with:
