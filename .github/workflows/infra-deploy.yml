@@ -19,6 +19,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Preflight required secrets
+        env:
+          ADMIN_CIDR: ${{ secrets.ADMIN_CIDR }}
+          VAULT_ALLOWED_CIDR: ${{ secrets.VAULT_ALLOWED_CIDR }}
+        run: |
+          test -n "$ADMIN_CIDR" || { echo "Missing required secret: ADMIN_CIDR"; exit 1; }
+          test -n "$VAULT_ALLOWED_CIDR" || { echo "Missing required secret: VAULT_ALLOWED_CIDR"; exit 1; }
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:

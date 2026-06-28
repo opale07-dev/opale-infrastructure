@@ -47,6 +47,10 @@ resource "openstack_compute_instance_v2" "opale_vault" {
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
 
+  lifecycle {
+    create_before_destroy = true
+  }
+
   # Bootstrap inline so the VM can actually execute the hardening baseline at first boot.
   user_data = <<-EOF
     #!/bin/sh
