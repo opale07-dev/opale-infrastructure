@@ -66,7 +66,7 @@ jobs:
 
       - name: 🔐 Securely Push SSH Key via GitHub CLI
         env:
-          GH_TOKEN: ${{ secrets.GMLABS_GLOBAL_PAT }}
+          GH_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           # 1. On extrait la clé de Terraform dans une variable locale au runner
           PRIVATE_KEY=$(terraform output -raw private_key)
