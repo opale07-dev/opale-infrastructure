@@ -15,6 +15,13 @@ terraform {
   }
 }
 
+locals {
+  ssh_port           = 2222
+  vault_internal_port = 8443
+  service_name       = "opale-vault"
+  environment        = "prod"
+}
+
 # Configuration du Provider (Infomaniak utilise OpenStack)
 provider "openstack" {
   # Les identifiants seront injectés via tes variables d'environnement OpenRC
@@ -28,26 +35,53 @@ data "openstack_images_image_v2" "alpine" {
 
 # 2. Définition de la clé SSH pour l'accès bare-metal
 resource "openstack_compute_keypair_v2" "opale_key" {
-  name       = "opale-vault-key"
+  name       = "${local.service_name}-key"
   public_key = var.ssh_public_key
 }
 
 # 3. Création de l'instance avec activation du vTPM
 resource "openstack_compute_instance_v2" "opale_vault" {
-  name            = "opale-vault-prod"
+  name            = "${local.service_name}-${local.environment}"
   image_id        = data.openstack_images_image_v2.alpine.id
   flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM
   key_pair        = openstack_compute_keypair_v2.opale_key.name
-  security_groups = ["default",openstack_compute_secgroup_v2.secgroup_opale.name]
+  security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
 
-  # Injection dynamique des arguments spécifiques à cette instance
+  # Bootstrap inline so the VM can actually execute the hardening baseline at first boot.
   user_data = <<-EOF
     #!/bin/sh
-    # Téléchargement ou exécution du script générique
-    sh ${path.module}/scripts/harden-alpine-generic.sh \
-      --ssh-port 2222 \
-      --app-port 8200 \
+    cat >/root/harden-alpine-vps.sh <<'SCRIPT'
+${file("${path.module}/../scripts/harden-alpine-vps.sh")}
+SCRIPT
+    cat >/root/opale-vault-sync.sh <<'SCRIPT'
+${file("${path.module}/../scripts/opale-vault-sync.sh")}
+SCRIPT
+    chmod 700 /root/harden-alpine-vps.sh
+    chmod 700 /root/opale-vault-sync.sh
+    /bin/sh /root/harden-alpine-vps.sh \
+      --ssh-port ${local.ssh_port} \
+      --app-port ${local.vault_internal_port} \
       --app-dir /opt/opale-vault
+    install -m 700 /root/opale-vault-sync.sh /usr/local/bin/opale-vault-sync
+    mkdir -p /etc/local.d /etc/periodic/15min /opt/opale-vault
+    cat >/etc/local.d/opale-vault-sync.start <<'SCRIPT'
+#!/bin/sh
+/usr/local/bin/opale-vault-sync >>/var/log/opale-vault-sync.log 2>&1 &
+SCRIPT
+    cat >/etc/periodic/15min/opale-vault-sync <<'SCRIPT'
+#!/bin/sh
+/usr/local/bin/opale-vault-sync >>/var/log/opale-vault-sync.log 2>&1
+SCRIPT
+    chmod 755 /etc/local.d/opale-vault-sync.start /etc/periodic/15min/opale-vault-sync
+    rc-update add local default
+    cat >/opt/opale-vault/deploy.env <<'SCRIPT'
+# Fill this file once on the VM, then the backend deployment is pull-based and autonomous.
+GITHUB_DEPLOY_USER=
+GITHUB_DEPLOY_PAT=
+VAULT_ADMIN_PUBKEYS=
+VAULT_TPM_NV_INDEX=0x1500016
+SCRIPT
+    chmod 600 /opt/opale-vault/deploy.env
   EOF
 
   # C'est ici qu'on force OpenStack à émuler la puce TPM 2.0 pour le Vault
@@ -63,30 +97,22 @@ resource "openstack_compute_instance_v2" "opale_vault" {
 
 # Définition du Groupe de Sécurité durci
 resource "openstack_compute_secgroup_v2" "secgroup_opale" {
-  name        = "opale-vault-secgroup"
+  name        = "${local.service_name}-secgroup"
   description = "Security group for Opale Vault (Restricted SSH and Vault)"
 
-  # Dans ton openstack_compute_secgroup_v2
+  # Hardened SSH admin port restricted to a trusted CIDR.
   rule {
-    from_port   = 22
-    to_port     = 22
+    from_port   = local.ssh_port
+    to_port     = local.ssh_port
     ip_protocol = "tcp"
-    cidr        = "0.0.0.0/0" # À restreindre à ton IP si tu veux être serein
+    cidr        = var.admin_cidr
   }
 
-  # Règle pour le SSH (Port 2222) - Reste ouvert à tous ou à restreindre aussi
+  # Restrictive Vault API rule.
   rule {
-    from_port   = 2222
-    to_port     = 2222
+    from_port   = local.vault_internal_port
+    to_port     = local.vault_internal_port
     ip_protocol = "tcp"
-    cidr        = "0.0.0.0/0" 
-  }
-
-  # Règle restrictive pour le Vault (Port 8443)
-  rule {
-    from_port   = 8443
-    to_port     = 8443
-    ip_protocol = "tcp"
-    cidr        = "144.24.253.255/32" # Le /32 indique que seule cette IP exacte est autorisée
+    cidr        = var.vault_allowed_cidr
   }
 }

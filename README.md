@@ -29,6 +29,7 @@ infra/
   outputs.tf
 scripts/
   harden-alpine-vps.sh
+  opale-vault-sync.sh
 .github/workflows/
   infra-deploy.yml
   vps-control.yml
@@ -58,7 +59,7 @@ scripts/
 - No application secret in Terraform code.
 - No durable secret in `user_data`.
 - OpenStack and S3 backend credentials come from CI secrets or local env.
-- Application secrets are injected after provisioning through the Vault path, not baked into the VM.
+- Application secrets are injected after provisioning through the host-local deploy env, not baked into Terraform or `user_data`.
 
 ## Prerequisites
 
@@ -124,12 +125,18 @@ or `scripts/**`, because the hardening script is embedded into the VM `user_data
 The current chain is:
 
 1. Terraform provisions the VM and first-boot hardening baseline.
-2. Terraform emits the public IP.
-3. A `repository_dispatch` event triggers the backend deployment workflow in `opale-core`.
+2. Terraform installs a local `opale-vault-sync` script on the VM.
+3. The VM pulls the deployment bundle (`docker-compose.prod.yml`, `Caddyfile`) and the latest image from `opale-core`/GHCR.
+4. The VM applies the compose state at boot and every 15 minutes without requiring inbound CI SSH access.
 
-Important: this is only fully hands-off if the deployment runner can actually reach the
-hardened SSH port on the new VM. If `ADMIN_CIDR` excludes the runner, the infrastructure
-will be created correctly but the application deployment job will fail to connect.
+The one-time manual action is to fill `/opt/opale-vault/deploy.env` on the VM with:
+
+- `GITHUB_DEPLOY_USER`
+- `GITHUB_DEPLOY_PAT` with `repo` + `read:packages`
+- `VAULT_ADMIN_PUBKEYS`
+- optionally `VAULT_TPM_NV_INDEX`
+
+After that, backend deployment is pull-based and autonomous.
 
 ## Security Notes
 
@@ -148,7 +155,9 @@ will be created correctly but the application deployment job will fail to connec
 - [ ] No application secret is stored in Terraform or `user_data`.
 - [ ] The service port model is documented: internal port, public port, admin port.
 - [ ] CI injects `ADMIN_CIDR` and `VAULT_ALLOWED_CIDR`.
-- [ ] The deployment runner is allowed by `ADMIN_CIDR`, or an alternative pull-based deployment path is in place.
+- [ ] `/opt/opale-vault/deploy.env` is populated once with GitHub/registry credentials and runtime admin values.
+- [ ] `/usr/local/bin/opale-vault-sync` succeeds manually on the VM.
+- [ ] The periodic pull-based sync can update the backend without inbound CI SSH access.
 
 ## Next Improvements
 

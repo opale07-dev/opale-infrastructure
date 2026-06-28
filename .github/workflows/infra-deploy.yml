@@ -88,10 +88,7 @@ jobs:
           echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
         working-directory: ./infra
 
-      - name: Trigger Opale Vault Deployment
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.OPALE_GLOBAL_PAT }} # Ton token GitHub pour avoir le droit de parler à l'autre repo
-          repository: opale07-dev/opale-core
-          event-type: infra-ready
-          client-payload: '{"vps_ip": "${{ steps.get_ip.outputs.ip }}"}'
+      - name: Summarize backend bootstrap
+        run: |
+          echo "Vault backend VM ready at ${{ steps.get_ip.outputs.ip }}"
+          echo "Next step: populate /opt/opale-vault/deploy.env once, then run /usr/local/bin/opale-vault-sync on the VM."
