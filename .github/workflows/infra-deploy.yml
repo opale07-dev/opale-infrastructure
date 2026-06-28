@@ -5,7 +5,9 @@ on:
     branches:
       - main
     paths:
-      - 'infra/**' # Se déclenche uniquement si des changements sont faits dans le dossier infra
+      - 'infra/**'
+      - 'scripts/**'
+      - '.github/workflows/infra-deploy.yml'
   workflow_dispatch: 
 
 jobs:
@@ -41,12 +43,18 @@ jobs:
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
           OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
           OS_USERNAME: ${{ secrets.OS_USERNAME }}
           OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
           OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
           TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_admin_cidr: ${{ secrets.ADMIN_CIDR }}
+          TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
         run: terraform plan
         working-directory: ./infra
 
@@ -55,33 +63,30 @@ jobs:
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
           OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
           OS_USERNAME: ${{ secrets.OS_USERNAME }}
           OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
           OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
           TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_admin_cidr: ${{ secrets.ADMIN_CIDR }}
+          TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
         run: terraform apply -auto-approve
         working-directory: ./infra
 
-      - name: 🔐 Securely Push SSH Key via GitHub CLI
-        env:
-          GH_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
-        run: |
-          # On extrait proprement la clé brute
-          terraform output -raw private_key > private_key.pem
-          
-          # On l'injecte proprement depuis le fichier pour conserver les retours à la ligne exacts
-          gh secret set SSH_PRIVATE_KEY --repo opale07-dev/opale-core < private_key.pem
-          
-          # Nettoyage immédiat du fichier temporaire
-          rm private_key.pem
-
       - name: Get Instance IP from Terraform
         id: get_ip
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
         run: |
           IP_ADDRESS=$(terraform output -json instance_ip | jq -r '.')
           echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
+        working-directory: ./infra
 
       - name: Trigger Opale Vault Deployment
         uses: peter-evans/repository-dispatch@v3
