@@ -104,8 +104,8 @@ fi
 log_section "4/9 — Firewall Configuration (Awall)"
 mkdir -p /etc/awall/optional
 
-# Construction dynamique des règles de filtrage selon la présence d'un port d'application
-FILTER_RULES="[ { \"in\": \"internet\", \"out\": \"_fw\", \"service\": \"ssh\", \"action\": \"ACCEPT\" }"
+# Construction dynamique des règles de filtrage selon les ports réellement choisis.
+FILTER_RULES="[ { \"in\": \"internet\", \"out\": \"_fw\", \"service\": { \"proto\": \"tcp\", \"port\": ${SSH_PORT} }, \"action\": \"ACCEPT\" }"
 if [ -n "$APP_PORT" ]; then
   FILTER_RULES="${FILTER_RULES}, { \"in\": \"internet\", \"out\": \"_fw\", \"service\": { \"proto\": \"tcp\", \"port\": ${APP_PORT} }, \"action\": \"ACCEPT\" }"
 fi

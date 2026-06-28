@@ -8,7 +8,7 @@ APP_DIR="/opt/opale-vault"
 DEPLOY_ENV="$APP_DIR/deploy.env"
 COMPOSE_FILE="$APP_DIR/docker-compose.prod.yml"
 CADDY_FILE="$APP_DIR/Caddyfile"
-HEALTH_URL="https://127.0.0.1:8443/api/health"
+HEALTH_URL="http://127.0.0.1:8443/api/health"
 REPO="opale07-dev/opale-core"
 REF="${OPALE_CORE_REF:-main}"
 
@@ -92,7 +92,7 @@ compose -f "$COMPOSE_FILE" up -d --remove-orphans
 
 log "Waiting for backend health"
 attempt=0
-until curl -fsSk "$HEALTH_URL" | grep -q '"status":"ok"'; do
+until curl -fsS "$HEALTH_URL" | grep -q '"status":"ok"'; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 12 ]; then
     log "Backend healthcheck failed after ${attempt} attempts"
