@@ -80,7 +80,7 @@ jobs:
       - name: Get Instance IP from Terraform
         id: get_ip
         run: |
-          IP_ADDRESS=$(terraform output -raw instance_ip)
+          IP_ADDRESS=$(terraform output -json instance_ip | jq -r '.')
           echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
 
       - name: Trigger Opale Vault Deployment
