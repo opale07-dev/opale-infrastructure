@@ -62,7 +62,7 @@ run "apk update && apk upgrade"
 log_ok "System packages updated"
 
 log_section "2/9 — Core Security Packages"
-run "apk add --no-cache ca-certificates curl fail2ban iptables awall audit openrc"
+run "apk add --no-cache ca-certificates curl fail2ban iptables awall audit openrc openssh"
 log_ok "Security stack installed"
 
 log_section "3/9 — SSH Hardening"
@@ -91,6 +91,7 @@ write_file "/etc/issue.net" "UNAUTHORIZED ACCESS PROHIBITED. All connections are
 
 if [ "$DRY_RUN" = false ]; then
   if sshd -t; then
+    rc-update add sshd default
     rc-service sshd restart 2>/dev/null || true
     log_ok "SSH service reloaded"
   else
