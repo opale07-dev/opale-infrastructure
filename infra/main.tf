@@ -38,14 +38,14 @@ resource "openstack_compute_instance_v2" "opale_vault" {
   image_id        = data.openstack_images_image_v2.alpine.id
   flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM
   key_pair        = openstack_compute_keypair_v2.opale_key.name
-  security_groups = ["default"]
+  security_groups = ["default",openstack_compute_secgroup_v2.secgroup_opale.name]
 
   # Injection dynamique des arguments spécifiques à cette instance
   user_data = <<-EOF
     #!/bin/sh
     # Téléchargement ou exécution du script générique
     sh ${path.module}/scripts/harden-alpine-generic.sh \
-      --ssh-port 22 \
+      --ssh-port 2222 \
       --app-port 8200 \
       --app-dir /opt/opale-vault
   EOF
