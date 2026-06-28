@@ -50,6 +50,7 @@ resource "openstack_compute_instance_v2" "opale_vault" {
 
   lifecycle {
     create_before_destroy = true
+    ignore_changes        = [user_data]
   }
 
   # C'est ici qu'on force OpenStack à émuler la puce TPM 2.0 pour le Vault
