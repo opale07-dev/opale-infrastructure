@@ -66,6 +66,14 @@ resource "openstack_compute_secgroup_v2" "secgroup_opale" {
   name        = "opale-vault-secgroup"
   description = "Security group for Opale Vault (Restricted SSH and Vault)"
 
+  # Dans ton openstack_compute_secgroup_v2
+  rule {
+    from_port   = 22
+    to_port     = 22
+    ip_protocol = "tcp"
+    cidr        = "0.0.0.0/0" # À restreindre à ton IP si tu veux être serein
+  }
+
   # Règle pour le SSH (Port 2222) - Reste ouvert à tous ou à restreindre aussi
   rule {
     from_port   = 2222
