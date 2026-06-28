@@ -28,6 +28,15 @@ log_ok() { echo "${GREEN}[OK]${NC}    $*"; }
 log_warn() { echo "${YELLOW}[WARN]${NC}  $*"; }
 log_section() { echo "\n${BLUE}━━━ $* ━━━${NC}"; }
 
+ensure_service_started() {
+  service_name="$1"
+  if rc-service "$service_name" status >/dev/null 2>&1; then
+    rc-service "$service_name" restart >/dev/null 2>&1 || rc-service "$service_name" start >/dev/null 2>&1 || true
+  else
+    rc-service "$service_name" start >/dev/null 2>&1 || rc-service "$service_name" restart >/dev/null 2>&1 || true
+  fi
+}
+
 run() {
   if [ "$DRY_RUN" = true ]; then
     echo "${YELLOW}[DRY-RUN]${NC} $*"
@@ -92,7 +101,7 @@ write_file "/etc/issue.net" "UNAUTHORIZED ACCESS PROHIBITED. All connections are
 if [ "$DRY_RUN" = false ]; then
   if sshd -t; then
     rc-update add sshd default
-    rc-service sshd restart 2>/dev/null || true
+    ensure_service_started sshd
     log_ok "SSH service reloaded"
   else
     log_warn "Invalid SSH configuration; reverting"
@@ -145,7 +154,9 @@ backend = auto
 "
 write_file "$FAIL2BAN_CONF" "$FAIL2BAN_CONTENT"
 run "rc-update add fail2ban default"
-run "rc-service fail2ban restart || true"
+if [ "$DRY_RUN" = false ]; then
+  ensure_service_started fail2ban
+fi
 log_ok "Fail2ban enabled"
 
 log_section "6/9 — Kernel Hardening (Sysctl)"
@@ -177,7 +188,9 @@ if [ -n "$APP_DIR" ]; then
 fi
 write_file "$AUDIT_RULES" "$AUDIT_CONTENT"
 run "rc-update add auditd default"
-run "rc-service auditd restart || true"
+if [ "$DRY_RUN" = false ]; then
+  ensure_service_started auditd
+fi
 log_ok "Auditd rules registered"
 
 log_section "8/9 — Lean Docker Isolation Engine"
@@ -195,7 +208,9 @@ DOCKER_DAEMON_CONTENT='{
 }'
 write_file "$DOCKER_DAEMON" "$DOCKER_DAEMON_CONTENT"
 run "rc-update add docker default"
-run "rc-service docker restart || true"
+if [ "$DRY_RUN" = false ]; then
+  ensure_service_started docker
+fi
 log_ok "Docker daemon sandboxed"
 
 log_section "9/9 — Optional Workspace & Clean Up"
