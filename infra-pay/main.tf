@@ -42,7 +42,7 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 resource "openstack_compute_instance_v2" "opale_pay" {
   name            = "${local.service_name}-${local.environment}"
   image_id        = data.openstack_images_image_v2.alpine.id
-  flavor_name     = "a2_ram4_disk50_perf1"
+  flavor_name     = "a2-ram4-disk50-perf1"
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
   user_data       = templatefile("${path.module}/cloud-init.sh.tftpl", {
