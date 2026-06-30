@@ -46,11 +46,17 @@ fetch_repo_file() {
   dest="$2"
   tmp="${dest}.tmp"
 
-  curl -fsSL \
-    -H "Authorization: Bearer ${GITHUB_DEPLOY_PAT}" \
-    -H "Accept: application/vnd.github.raw" \
-    "https://api.github.com/repos/${REPO}/contents/${path}?ref=${REF}" \
-    -o "$tmp"
+  if [ -n "${GITHUB_DEPLOY_PAT:-}" ]; then
+    curl -fsSL \
+      -H "Authorization: Bearer ${GITHUB_DEPLOY_PAT}" \
+      -H "Accept: application/vnd.github.raw" \
+      "https://api.github.com/repos/${REPO}/contents/${path}?ref=${REF}" \
+      -o "$tmp"
+  else
+    curl -fsSL \
+      "https://raw.githubusercontent.com/${REPO}/${REF}/${path}" \
+      -o "$tmp"
+  fi
 
   mv "$tmp" "$dest"
 }
@@ -160,9 +166,6 @@ require_cmd docker
 require_file "$DEPLOY_ENV"
 . "$DEPLOY_ENV"
 
-: "${GITHUB_DEPLOY_USER:?GITHUB_DEPLOY_USER is required in $DEPLOY_ENV}"
-: "${GITHUB_DEPLOY_PAT:?GITHUB_DEPLOY_PAT is required in $DEPLOY_ENV}"
-
 log "Fetching deployment bundle from ${REPO}@${REF}"
 fetch_repo_file "docker-compose.prod.yml" "$COMPOSE_FILE"
 write_runtime_env
@@ -170,8 +173,12 @@ set -a
 . "$RUNTIME_ENV"
 set +a
 
-log "Logging in to GHCR"
-printf '%s' "$GITHUB_DEPLOY_PAT" | docker login ghcr.io -u "$GITHUB_DEPLOY_USER" --password-stdin >/dev/null
+if [ -n "${GITHUB_DEPLOY_USER:-}" ] && [ -n "${GITHUB_DEPLOY_PAT:-}" ]; then
+  log "Logging in to GHCR"
+  printf '%s' "$GITHUB_DEPLOY_PAT" | docker login ghcr.io -u "$GITHUB_DEPLOY_USER" --password-stdin >/dev/null
+else
+  log "No GHCR credentials provided, attempting anonymous image pulls"
+fi
 
 log "Pulling backend images"
 compose -f "$COMPOSE_FILE" pull
