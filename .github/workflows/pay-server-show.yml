@@ -1,0 +1,33 @@
+name: "Opale Pay Server Show"
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_id:
+        description: "Exact OpenStack server ID"
+        required: true
+        type: string
+
+jobs:
+  server-show:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install OpenStack Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      - name: Show Opale Pay server details
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          openstack server show "${{ github.event.inputs.server_id }}" -f yaml

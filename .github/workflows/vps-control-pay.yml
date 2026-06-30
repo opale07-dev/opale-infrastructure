@@ -11,6 +11,11 @@ on:
         options:
           - start
           - stop
+      server_id:
+        description: 'ID OpenStack exact de la VM (recommandé si plusieurs serveurs portent le même nom)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   control:
@@ -33,10 +38,15 @@ jobs:
           OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
           OS_IDENTITY_API_VERSION: "3"
         run: |
-          echo "Sending ${{ github.event.inputs.action }} signal to opale-pay-prod..."
-          openstack server ${{ github.event.inputs.action }} opale-pay-prod
+          TARGET="${{ github.event.inputs.server_id }}"
+          if [ -z "$TARGET" ]; then
+            TARGET="opale-pay-prod"
+          fi
+
+          echo "Sending ${{ github.event.inputs.action }} signal to ${TARGET}..."
+          openstack server ${{ github.event.inputs.action }} "$TARGET"
 
           echo "Waiting for status verification..."
           sleep 5
-          STATUS=$(openstack server show opale-pay-prod -c status -f value)
+          STATUS=$(openstack server show "$TARGET" -c status -f value)
           echo "Current VM Status: $STATUS"
