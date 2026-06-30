@@ -1,0 +1,73 @@
+name: "Opale Pay - Backend Bootstrap SSH Window"
+
+on:
+  workflow_dispatch:
+    inputs:
+      bootstrap_cidr:
+        description: "Temporary CIDR allowed to reach the Alpine initial SSH port 22. Empty closes the window."
+        required: false
+        default: ""
+
+concurrency:
+  group: pay-backend-bootstrap-window
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: "Apply Bootstrap SSH Window"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate bootstrap CIDR
+        env:
+          BOOTSTRAP_CIDR: ${{ inputs.bootstrap_cidr }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BOOTSTRAP_CIDR" ]; then
+            echo "Bootstrap SSH window will be closed."
+            exit 0
+          fi
+          python3 -c 'import ipaddress, os; cidr = os.environ["BOOTSTRAP_CIDR"]; ipaddress.ip_network(cidr, strict=False); print(f"Bootstrap SSH window will be opened for {cidr}.")'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.0
+
+      - name: Terraform Init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+        run: |
+          terraform init \
+            -backend-config="endpoint=https://s3.pub2.infomaniak.cloud" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_s3_checksum=true" \
+            -backend-config="force_path_style=true"
+        working-directory: ./infra-pay
+
+      - name: Apply bootstrap SSH window
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.OPALE_PAY_SSH_PUBLIC_KEY }}
+          TF_VAR_admin_cidr: ${{ secrets.OPALE_PAY_ADMIN_CIDR }}
+          TF_VAR_pay_allowed_cidr: ${{ secrets.OPALE_PAY_ALLOWED_CIDR }}
+          TF_VAR_bootstrap_cidr: ${{ inputs.bootstrap_cidr }}
+        run: terraform apply -auto-approve
+        working-directory: ./infra-pay
