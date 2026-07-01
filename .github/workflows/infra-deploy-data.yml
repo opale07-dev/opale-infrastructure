@@ -1,0 +1,126 @@
+name: "Opale Data Index - Infrastructure GitOps"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra-data/**'
+      - 'scripts/**'
+      - '.github/workflows/infra-deploy-data.yml'
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    name: "Automated Deployment (Infomaniak Cloud)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Preflight required secrets
+        env:
+          ADMIN_CIDR: ${{ secrets.OPALE_DATA_ADMIN_CIDR }}
+          DATA_ALLOWED_CIDR: ${{ secrets.OPALE_DATA_ALLOWED_CIDR }}
+          SSH_PUBLIC_KEY: ${{ secrets.OPALE_DATA_SSH_PUBLIC_KEY }}
+          OPALE_GLOBAL_PAT: ${{ secrets.OPALE_GLOBAL_PAT }}
+        run: |
+          test -n "$ADMIN_CIDR" || { echo "Missing required secret: OPALE_DATA_ADMIN_CIDR"; exit 1; }
+          test -n "$DATA_ALLOWED_CIDR" || { echo "Missing required secret: OPALE_DATA_ALLOWED_CIDR"; exit 1; }
+          test -n "$SSH_PUBLIC_KEY" || { echo "Missing required secret: OPALE_DATA_SSH_PUBLIC_KEY"; exit 1; }
+          test -n "$OPALE_GLOBAL_PAT" || { echo "Missing required secret: OPALE_GLOBAL_PAT"; exit 1; }
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.0
+
+      - name: Terraform Init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+        run: |
+          terraform init \
+            -backend-config="endpoint=https://s3.pub2.infomaniak.cloud" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_s3_checksum=true" \
+            -backend-config="force_path_style=true"
+        working-directory: ./infra-data
+
+      - name: Terraform Plan
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.OPALE_DATA_SSH_PUBLIC_KEY }}
+          TF_VAR_admin_cidr: ${{ secrets.OPALE_DATA_ADMIN_CIDR }}
+          TF_VAR_data_allowed_cidr: ${{ secrets.OPALE_DATA_ALLOWED_CIDR }}
+        run: terraform plan
+        working-directory: ./infra-data
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.OPALE_DATA_SSH_PUBLIC_KEY }}
+          TF_VAR_admin_cidr: ${{ secrets.OPALE_DATA_ADMIN_CIDR }}
+          TF_VAR_data_allowed_cidr: ${{ secrets.OPALE_DATA_ALLOWED_CIDR }}
+        run: terraform apply -auto-approve
+        working-directory: ./infra-data
+
+      - name: Get deployment target outputs from Terraform
+        id: target
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+        run: |
+          IP_ADDRESS=$(terraform output -json instance_ip | jq -r '.')
+          SSH_PORT=$(terraform output -json ssh_port | jq -r '.')
+          SSH_USER=$(terraform output -json ssh_user | jq -r '.')
+          echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
+          echo "ssh_port=$SSH_PORT" >> $GITHUB_OUTPUT
+          echo "ssh_user=$SSH_USER" >> $GITHUB_OUTPUT
+        working-directory: ./infra-data
+
+      - name: Publish deployment target to OpaleDataIndex
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
+          BACKEND_IP: ${{ steps.target.outputs.ip }}
+          BACKEND_SSH_PORT: ${{ steps.target.outputs.ssh_port }}
+          BACKEND_SSH_USER: ${{ steps.target.outputs.ssh_user }}
+        run: |
+          set -euo pipefail
+          test -n "$BACKEND_IP" || { echo "Missing Terraform output: instance_ip"; exit 1; }
+          gh variable set PRODUCTION_VPS_IP --repo opale07-dev/OpaleDataIndex --body "$BACKEND_IP"
+          gh variable set PRODUCTION_VPS_SSH_PORT --repo opale07-dev/OpaleDataIndex --body "$BACKEND_SSH_PORT"
+          gh variable set PRODUCTION_VPS_SSH_USER --repo opale07-dev/OpaleDataIndex --body "$BACKEND_SSH_USER"
+          gh variable set OPALE_DATA_INDEX_URL --repo opale07-dev/OpaleDataIndex --body "http://${BACKEND_IP}:3001"
+
+      - name: Summarize provisioning result
+        run: |
+          echo "Opale Data Index VM provisioned at ${{ steps.target.outputs.ip }}"
+          echo "SSH target: ${{ steps.target.outputs.ssh_user }}@${{ steps.target.outputs.ip }}:${{ steps.target.outputs.ssh_port }}"
+          echo "Application deployment must be triggered explicitly by CI/CD from the product side."
