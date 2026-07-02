@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'infra/**'
+      - 'infra-vault/**'
       - 'scripts/**'
       - '.github/workflows/infra-deploy.yml'
   workflow_dispatch: 
@@ -49,7 +49,7 @@ jobs:
             -backend-config="skip_metadata_api_check=true" \
             -backend-config="skip_s3_checksum=true" \
             -backend-config="force_path_style=true"
-        working-directory: ./infra
+        working-directory: ./infra-vault
 
       - name: Terraform Plan
         env:
@@ -69,7 +69,7 @@ jobs:
           TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
           TF_VAR_bootstrap_cidr: ""
         run: terraform plan
-        working-directory: ./infra
+        working-directory: ./infra-vault
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
@@ -90,7 +90,7 @@ jobs:
           TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
           TF_VAR_bootstrap_cidr: ""
         run: terraform apply -auto-approve
-        working-directory: ./infra
+        working-directory: ./infra-vault
 
       - name: Get Instance IP from Terraform
         id: get_ip
@@ -100,7 +100,7 @@ jobs:
         run: |
           IP_ADDRESS=$(terraform output -json instance_ip | jq -r '.')
           echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
-        working-directory: ./infra
+        working-directory: ./infra-vault
 
       - name: Publish backend target to opale-core
         if: github.ref == 'refs/heads/main'

@@ -12,3 +12,8 @@ output "ssh_port" {
   value       = 2222
   description = "The hardened SSH admin port."
 }
+
+output "ssh_user" {
+  value       = "ubuntu"
+  description = "The SSH admin user for the Opale Pay instance."
+}

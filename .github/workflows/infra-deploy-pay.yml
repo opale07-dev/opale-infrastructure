@@ -67,7 +67,6 @@ jobs:
           TF_VAR_ssh_public_key: ${{ secrets.OPALE_PAY_SSH_PUBLIC_KEY }}
           TF_VAR_admin_cidr: ${{ secrets.OPALE_PAY_ADMIN_CIDR }}
           TF_VAR_pay_allowed_cidr: ${{ secrets.OPALE_PAY_ALLOWED_CIDR }}
-          TF_VAR_bootstrap_cidr: ""
         run: terraform plan
         working-directory: ./infra-pay
 
@@ -88,32 +87,40 @@ jobs:
           TF_VAR_ssh_public_key: ${{ secrets.OPALE_PAY_SSH_PUBLIC_KEY }}
           TF_VAR_admin_cidr: ${{ secrets.OPALE_PAY_ADMIN_CIDR }}
           TF_VAR_pay_allowed_cidr: ${{ secrets.OPALE_PAY_ALLOWED_CIDR }}
-          TF_VAR_bootstrap_cidr: ""
         run: terraform apply -auto-approve
         working-directory: ./infra-pay
 
-      - name: Get Instance IP from Terraform
-        id: get_ip
+      - name: Get deployment target outputs from Terraform
+        id: target
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
         run: |
           IP_ADDRESS=$(terraform output -json instance_ip | jq -r '.')
+          SSH_PORT=$(terraform output -json ssh_port | jq -r '.')
+          SSH_USER=$(terraform output -json ssh_user | jq -r '.')
           echo "ip=$IP_ADDRESS" >> $GITHUB_OUTPUT
+          echo "ssh_port=$SSH_PORT" >> $GITHUB_OUTPUT
+          echo "ssh_user=$SSH_USER" >> $GITHUB_OUTPUT
         working-directory: ./infra-pay
 
-      - name: Publish backend target to OpalePay
+      - name: Publish deployment target to OpalePay
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
-          BACKEND_IP: ${{ steps.get_ip.outputs.ip }}
+          BACKEND_IP: ${{ steps.target.outputs.ip }}
+          BACKEND_SSH_PORT: ${{ steps.target.outputs.ssh_port }}
+          BACKEND_SSH_USER: ${{ steps.target.outputs.ssh_user }}
         run: |
           set -euo pipefail
           test -n "$BACKEND_IP" || { echo "Missing Terraform output: instance_ip"; exit 1; }
-          gh secret set PRODUCTION_VPS_IP --repo opale07-dev/OpalePay --body "$BACKEND_IP"
-          gh secret set OPALE_PAY_BACKEND_URL --repo opale07-dev/OpalePay --body "${BACKEND_IP}:8080"
+          gh variable set PRODUCTION_VPS_IP --repo opale07-dev/OpalePay --body "$BACKEND_IP"
+          gh variable set PRODUCTION_VPS_SSH_PORT --repo opale07-dev/OpalePay --body "$BACKEND_SSH_PORT"
+          gh variable set PRODUCTION_VPS_SSH_USER --repo opale07-dev/OpalePay --body "$BACKEND_SSH_USER"
+          gh variable set OPALE_PAY_BACKEND_URL --repo opale07-dev/OpalePay --body "http://${BACKEND_IP}:8080"
 
-      - name: Summarize backend bootstrap
+      - name: Summarize provisioning result
         run: |
-          echo "Opale Pay backend VM provisioned at ${{ steps.get_ip.outputs.ip }}"
-          echo "Backend bootstrap/deploy is handled by the OpalePay repository workflow."
+          echo "Opale Pay backend VM provisioned at ${{ steps.target.outputs.ip }}"
+          echo "SSH target: ${{ steps.target.outputs.ssh_user }}@${{ steps.target.outputs.ip }}:${{ steps.target.outputs.ssh_port }}"
+          echo "Application deployment must be triggered explicitly by CI/CD from the product side."

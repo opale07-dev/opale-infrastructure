@@ -10,20 +10,27 @@ This repository is the canonical provisioning layer for long-lived Opale VMs. It
 - keeping Terraform state in a remote backend;
 - exposing only the minimum admin and app surfaces required by each service.
 
+It is also the canonical home for deployment-owned infrastructure configuration that does not belong in product repositories, including the public Oracle edge configuration.
+
 It is not a secret store and must never contain long-lived application secrets.
 
 ## Current Scope
 
-The current implementation provisions the first critical VM:
+The current implementation provisions the first critical VMs:
 
 - `opale-vault-prod`
+- `opale-pay-prod`
 
-This VM is intended to become the first hardened runtime for the Opale Vault control plane.
+These VMs are intended to become hardened runtimes for the first sensitive Opale control planes.
 
 ## Repository Layout
 
 ```text
-infra/
+infra-vault/
+  main.tf
+  variables.tf
+  outputs.tf
+infra-pay/
   main.tf
   variables.tf
   outputs.tf
@@ -33,6 +40,8 @@ scripts/
 .github/workflows/
   infra-deploy.yml
   vps-control.yml
+  infra-deploy-pay.yml
+  vps-control-pay.yml
 ```
 
 ## Conventions
@@ -47,12 +56,19 @@ scripts/
 
 ### Base Runtime
 
-- Alpine Linux by default for lean service nodes.
+- Ubuntu 26.04 LTS Resolute Raccoon for all Infomaniak/OpenStack VMs.
 - SSH on a non-default admin port.
 - `PasswordAuthentication no`.
 - Firewall default-drop.
 - Fail2ban, auditd, sysctl hardening.
 - Docker configured with reduced privileges and log rotation when needed.
+
+### Oracle Edge
+
+- The Oracle edge VPS is not provisioned by Terraform.
+- Its deployment configuration still belongs in `opale-infrastructure`.
+- Reverse proxy configuration, host hardening, validation, and healthchecks for Oracle edge should live here rather than in `OpaleVault` or `OpalePay`.
+- Oracle edge changes should be repeatable and idempotent, with config validation before reload and a post-deploy healthcheck.
 
 ### Secrets
 
@@ -87,12 +103,18 @@ Required secrets:
 - `ADMIN_CIDR`
 - `VAULT_ALLOWED_CIDR`
 
+Additional dedicated secrets for Opale Pay:
+
+- `OPALE_PAY_SSH_PUBLIC_KEY`
+- `OPALE_PAY_ADMIN_CIDR`
+- `OPALE_PAY_ALLOWED_CIDR`
+
 ## Usage
 
 ### Plan locally
 
 ```bash
-cd infra
+cd infra-vault
 terraform init \
   -backend-config="endpoint=https://s3.pub2.infomaniak.cloud" \
   -backend-config="skip_requesting_account_id=true" \
@@ -119,24 +141,20 @@ terraform apply \
 
 ### CI/CD
 
-`infra-deploy.yml` runs `init`, `plan`, and `apply` on pushes to `main` that touch `infra/**`
-or `scripts/**`, because the hardening script is embedded into the VM `user_data`.
+`infra-deploy.yml` and `infra-deploy-pay.yml` run `init`, `plan`, and `apply`
+on infrastructure changes because the hardening baseline is embedded into the VM
+`user_data`.
 
-The current chain is:
+The intended delivery boundary is:
 
-1. Terraform provisions the VM and first-boot hardening baseline.
-2. Terraform installs a local `opale-vault-sync` script on the VM.
-3. The VM pulls the deployment bundle (`docker-compose.prod.yml`, `Caddyfile`) and the latest image from `opale-core`/GHCR.
-4. The VM applies the compose state at boot and every 15 minutes without requiring inbound CI SSH access.
+1. Terraform provisions the VM, networking, and first-boot hardening baseline.
+2. `cloud-init` performs machine bootstrap only.
+3. The application VM remains a passive deployment target.
+4. Application rollout is triggered explicitly by CI/CD from the product side.
 
-The one-time manual action is to fill `/opt/opale-vault/deploy.env` on the VM with:
-
-- `GITHUB_DEPLOY_USER`
-- `GITHUB_DEPLOY_PAT` with `repo` + `read:packages`
-- `VAULT_ADMIN_PUBKEYS`
-- optionally `VAULT_TPM_NV_INDEX`
-
-After that, backend deployment is pull-based and autonomous.
+For `opale-pay`, the infrastructure workflow publishes the VM connection target
+to the `OpalePay` repository so the product pipeline can push the selected
+release explicitly.
 
 ## Security Notes
 
@@ -155,12 +173,12 @@ After that, backend deployment is pull-based and autonomous.
 - [ ] No application secret is stored in Terraform or `user_data`.
 - [ ] The service port model is documented: internal port, public port, admin port.
 - [ ] CI injects `ADMIN_CIDR` and `VAULT_ALLOWED_CIDR`.
-- [ ] `/opt/opale-vault/deploy.env` is populated once with GitHub/registry credentials and runtime admin values.
-- [ ] `/usr/local/bin/opale-vault-sync` succeeds manually on the VM.
-- [ ] The periodic pull-based sync can update the backend without inbound CI SSH access.
+- [ ] The VM bootstrap completes without embedding application deployment logic.
+- [ ] The product pipeline can deploy explicitly to the provisioned target.
 
 ## Next Improvements
 
+- Add a dedicated `edge-oracle/` deployment structure for the public Oracle VPS.
 - Add a dedicated cloud-init template per service.
 - Split service modules by role if more VMs are added.
 - Add reverse proxy/TLS conventions for public services.

@@ -22,14 +22,3 @@ variable "pay_allowed_cidr" {
     error_message = "pay_allowed_cidr must be a non-empty valid CIDR (example: 198.51.100.20/32)."
   }
 }
-
-variable "bootstrap_cidr" {
-  type        = string
-  description = "Temporary CIDR allowed to reach the image's initial SSH port 22 during GitHub Actions bootstrap. Empty disables the rule."
-  default     = ""
-
-  validation {
-    condition     = trimspace(var.bootstrap_cidr) == "" || can(cidrhost(var.bootstrap_cidr, 0))
-    error_message = "bootstrap_cidr must be empty or a valid CIDR (example: 203.0.113.10/32)."
-  }
-}
