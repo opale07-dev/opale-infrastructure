@@ -1,0 +1,72 @@
+(opale_edge_security) {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		-Server
+	}
+
+	coraza_waf {
+		load_owasp_crs
+		directives `
+			Include @coraza.conf-recommended
+			Include @crs-setup.conf.example
+			Include @owasp_crs/*.conf
+			SecRuleEngine On
+		`
+	}
+
+	# Les endpoints wallet sont stricts par design: challenge en GET uniquement,
+	# vérification wallet et session admin en POST JSON uniquement.
+	@wallet_challenge_invalid_method {
+		path /api/auth/challenge /vault/api/auth/challenge
+		not method GET
+	}
+	respond @wallet_challenge_invalid_method "Method Not Allowed" 405
+
+	@wallet_auth_invalid_method {
+		path /api/auth/verify /vault/api/auth/verify /api/admin/session /vault/api/admin/session
+		not method POST
+	}
+	respond @wallet_auth_invalid_method "Method Not Allowed" 405
+
+	@wallet_auth_non_json {
+		path /api/auth/verify /vault/api/auth/verify /api/admin/session /vault/api/admin/session
+		not header Content-Type application/json*
+	}
+	respond @wallet_auth_non_json "Unsupported Media Type" 415
+
+	handle_errors 403 {
+		header X-Opale-WAF "blocked"
+		respond "Request blocked by Opale Oracle edge policy." 403
+	}
+}
+
+core.gmlabs.ch {
+	import opale_edge_security
+
+	handle_path /vault* {
+		reverse_proxy opale-vault-frontend:80
+	}
+
+	handle {
+		reverse_proxy opale-vault-frontend:80
+	}
+}
+
+144.24.253.255 {
+	tls internal
+	import opale_edge_security
+
+	handle_path /vault* {
+		reverse_proxy opale-vault-frontend:80
+	}
+
+	handle {
+		reverse_proxy opale-vault-frontend:80
+	}
+}

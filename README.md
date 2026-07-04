@@ -26,6 +26,11 @@ These VMs are intended to become hardened runtimes for the first sensitive Opale
 ## Repository Layout
 
 ```text
+edge-oracle/
+  Dockerfile
+  Caddyfile
+  docker-compose.yml
+  sites/
 infra-vault/
   main.tf
   variables.tf
@@ -69,6 +74,8 @@ scripts/
 - Its deployment configuration still belongs in `opale-infrastructure`.
 - Reverse proxy configuration, host hardening, validation, and healthchecks for Oracle edge should live here rather than in `OpaleVault` or `OpalePay`.
 - Oracle edge changes should be repeatable and idempotent, with config validation before reload and a post-deploy healthcheck.
+- A full WAF rollout with Coraza requires the shared Oracle proxy runtime itself to be versioned and deployed as infrastructure, because stock Caddy cannot load `coraza_waf` without a custom build.
+- Until that shared proxy lifecycle is owned here, product repos may only ship stock-Caddy-safe hardening such as security headers and strict method/content-type guards on sensitive API routes.
 
 ### Secrets
 
@@ -145,6 +152,9 @@ terraform apply \
 on infrastructure changes because the hardening baseline is embedded into the VM
 `user_data`.
 
+`edge-oracle-deploy.yml` builds and deploys the shared Oracle public proxy as
+an infrastructure-owned artifact.
+
 The intended delivery boundary is:
 
 1. Terraform provisions the VM, networking, and first-boot hardening baseline.
@@ -178,7 +188,6 @@ release explicitly.
 
 ## Next Improvements
 
-- Add a dedicated `edge-oracle/` deployment structure for the public Oracle VPS.
 - Add a dedicated cloud-init template per service.
 - Split service modules by role if more VMs are added.
 - Add reverse proxy/TLS conventions for public services.

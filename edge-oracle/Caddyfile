@@ -1,0 +1,10 @@
+{
+	default_sni core.gmlabs.ch
+	order coraza_waf first
+
+	servers {
+		protocols h1 h2
+	}
+}
+
+import /etc/caddy/sites/*.caddy

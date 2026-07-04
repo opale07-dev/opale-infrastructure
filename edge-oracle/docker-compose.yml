@@ -1,0 +1,23 @@
+services:
+  proxy:
+    image: ghcr.io/opale07-dev/opale-oracle-edge:latest
+    container_name: opale-oracle-edge-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - edge
+
+networks:
+  edge:
+    name: opale-edge
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}

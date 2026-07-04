@@ -1,0 +1,104 @@
+name: "Oracle Edge - Deploy Shared Proxy"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'edge-oracle/**'
+      - '.github/workflows/edge-oracle-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy-edge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Preflight required secrets
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          test -n "$ORACLE_VPS_IP" || { echo "Missing required secret: ORACLE_VPS_IP"; exit 1; }
+          test -n "$ORACLE_SSH_KEY" || { echo "Missing required secret: ORACLE_SSH_KEY"; exit 1; }
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Oracle edge image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./edge-oracle
+          file: ./edge-oracle/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/opale07-dev/opale-oracle-edge:latest
+            ghcr.io/opale07-dev/opale-oracle-edge:${{ github.sha }}
+
+      - name: Export Oracle edge image bundle
+        run: |
+          docker pull ghcr.io/opale07-dev/opale-oracle-edge:latest
+          docker save ghcr.io/opale07-dev/opale-oracle-edge:latest | gzip > /tmp/opale-oracle-edge.tar.gz
+
+      - name: Copy edge deployment bundle to Oracle VPS
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key -P 2222 \
+            edge-oracle/docker-compose.yml \
+            edge-oracle/Caddyfile \
+            ubuntu@${{ secrets.ORACLE_VPS_IP }}:/tmp/
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key -P 2222 -r \
+            edge-oracle/sites \
+            ubuntu@${{ secrets.ORACLE_VPS_IP }}:/tmp/
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key -P 2222 \
+            /tmp/opale-oracle-edge.tar.gz \
+            ubuntu@${{ secrets.ORACLE_VPS_IP }}:/tmp/opale-oracle-edge.tar.gz
+
+      - name: Deploy shared Oracle edge
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_VPS_IP }}
+          port: 2222
+          username: ubuntu
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            set -euo pipefail
+
+            sudo install -d -m 0755 -o ubuntu -g ubuntu /opt/opale-edge-oracle
+            sudo install -d -m 0755 -o ubuntu -g ubuntu /opt/opale-edge-oracle/sites
+
+            sudo mv /tmp/docker-compose.yml /opt/opale-edge-oracle/docker-compose.yml
+            sudo mv /tmp/Caddyfile /opt/opale-edge-oracle/Caddyfile
+            sudo rm -rf /opt/opale-edge-oracle/sites
+            sudo mv /tmp/sites /opt/opale-edge-oracle/sites
+            sudo chown -R ubuntu:ubuntu /opt/opale-edge-oracle
+
+            docker load -i /tmp/opale-oracle-edge.tar.gz
+            rm -f /tmp/opale-oracle-edge.tar.gz
+
+            docker run --rm \
+              -v /opt/opale-edge-oracle/Caddyfile:/etc/caddy/Caddyfile:ro \
+              -v /opt/opale-edge-oracle/sites:/etc/caddy/sites:ro \
+              ghcr.io/opale07-dev/opale-oracle-edge:latest \
+              validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+            cd /opt/opale-edge-oracle
+            docker compose -f docker-compose.yml up -d --remove-orphans
+
+            sleep 3
+            docker exec opale-oracle-edge-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+            echo "Shared Oracle edge deployed."
