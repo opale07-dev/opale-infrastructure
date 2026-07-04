@@ -22,6 +22,9 @@ are used until the first public version.
 - `edge-oracle-deploy.yml`: pre-start config validation failed with exit 127
   because the Caddy image has no ENTRYPOINT — the `docker run` command must
   start with `caddy` (`caddy validate ...`), not `validate ...`.
+- `edge-oracle-deploy.yml`: the deploy now removes any legacy container still
+  publishing 80/443 (e.g. `opale-vault-proxy-1`) before starting the shared
+  edge proxy — first deploy failed with "Bind for 0.0.0.0:443 failed".
 
 ### Changed
 

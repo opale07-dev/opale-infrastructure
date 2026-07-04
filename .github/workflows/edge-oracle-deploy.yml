@@ -95,6 +95,18 @@ jobs:
               ghcr.io/opale07-dev/opale-oracle-edge:latest \
               caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
+            # Reprise des ports publics 80/443 : sur ce hote, ils appartiennent
+            # au edge partage. Retirer tout proxy legacy qui les occupe encore
+            # (ex: opale-vault-proxy-1 d'avant la migration edge).
+            for port in 80 443; do
+              docker ps --format '{{.ID}} {{.Names}}' --filter "publish=$port" | while read -r cid cname; do
+                if [ "$cname" != "opale-oracle-edge-proxy" ]; then
+                  echo "Retrait du proxy legacy '$cname' qui occupe le port $port."
+                  docker rm -f "$cid"
+                fi
+              done
+            done
+
             cd /opt/opale-edge-oracle
             docker compose -f docker-compose.yml up -d --remove-orphans
 
