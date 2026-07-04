@@ -27,6 +27,11 @@ are used until the first public version.
   edge proxy — first deploy failed with "Bind for 0.0.0.0:443 failed".
 - `backend-bootstrap-window.yml`: fixed stale `working-directory: ./infra`
   (the stack lives in `./infra-vault`).
+- Vault workflows now use a dedicated `VAULT_SSH_PUBLIC_KEY` secret (paired
+  with `SSH_PRIVATE_KEY` on opale-core) instead of the shared
+  `SSH_PUBLIC_KEY` — the previous pairing was mismatched and broke the
+  backend deploy with "Permission denied (publickey)". Pay/Data stacks keep
+  the shared key.
 - `infra-vault`: `image_id` added to `lifecycle.ignore_changes` so a newer
   `most_recent` Ubuntu image can never trigger an implicit VM replacement
   during routine applies (e.g. SSH window); image migrations must use an
