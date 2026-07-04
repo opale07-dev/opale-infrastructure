@@ -93,7 +93,7 @@ jobs:
               -v /opt/opale-edge-oracle/Caddyfile:/etc/caddy/Caddyfile:ro \
               -v /opt/opale-edge-oracle/sites:/etc/caddy/sites:ro \
               ghcr.io/opale07-dev/opale-oracle-edge:latest \
-              validate --config /etc/caddy/Caddyfile --adapter caddyfile
+              caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
             cd /opt/opale-edge-oracle
             docker compose -f docker-compose.yml up -d --remove-orphans

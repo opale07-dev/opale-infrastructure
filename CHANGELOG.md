@@ -17,6 +17,12 @@ are used until the first public version.
   manual OpenStack server operations for the Vault VM; delete requires the
   `DELETE-VAULT-VM` confirmation.
 
+### Fixed
+
+- `edge-oracle-deploy.yml`: pre-start config validation failed with exit 127
+  because the Caddy image has no ENTRYPOINT — the `docker run` command must
+  start with `caddy` (`caddy validate ...`), not `validate ...`.
+
 ### Changed
 
 - `infra-vault` migrated from Alpine Linux 3 to Ubuntu LTS minimal per the
