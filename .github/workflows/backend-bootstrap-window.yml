@@ -50,7 +50,7 @@ jobs:
             -backend-config="skip_metadata_api_check=true" \
             -backend-config="skip_s3_checksum=true" \
             -backend-config="force_path_style=true"
-        working-directory: ./infra
+        working-directory: ./infra-vault
 
       - name: Apply bootstrap SSH window
         env:
@@ -70,4 +70,4 @@ jobs:
           TF_VAR_vault_allowed_cidr: ${{ secrets.VAULT_ALLOWED_CIDR }}
           TF_VAR_bootstrap_cidr: ${{ inputs.bootstrap_cidr }}
         run: terraform apply -auto-approve
-        working-directory: ./infra
+        working-directory: ./infra-vault

@@ -25,6 +25,12 @@ are used until the first public version.
 - `edge-oracle-deploy.yml`: the deploy now removes any legacy container still
   publishing 80/443 (e.g. `opale-vault-proxy-1`) before starting the shared
   edge proxy — first deploy failed with "Bind for 0.0.0.0:443 failed".
+- `backend-bootstrap-window.yml`: fixed stale `working-directory: ./infra`
+  (the stack lives in `./infra-vault`).
+- `infra-vault`: `image_id` added to `lifecycle.ignore_changes` so a newer
+  `most_recent` Ubuntu image can never trigger an implicit VM replacement
+  during routine applies (e.g. SSH window); image migrations must use an
+  explicit `terraform apply -replace`.
 
 ### Changed
 
