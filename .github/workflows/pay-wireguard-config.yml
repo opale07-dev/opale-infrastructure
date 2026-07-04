@@ -1,0 +1,130 @@
+name: "Opale Pay - Configure WireGuard"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ip:
+        description: "Optional Opale Pay VM IP. Empty uses Terraform output."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opale-pay-wireguard-config
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Preflight required values
+        env:
+          OPALE_PAY_SSH_PRIVATE_KEY: ${{ secrets.OPALE_PAY_SSH_PRIVATE_KEY }}
+          OPALE_PAY_WG_PRIVATE_KEY: ${{ secrets.OPALE_PAY_WG_PRIVATE_KEY }}
+          IFK_WG_PUBLIC_KEY: ${{ secrets.IFK_WG_PUBLIC_KEY }}
+          IFK_WG_ENDPOINT: ${{ vars.IFK_WG_ENDPOINT || secrets.IFK_WG_ENDPOINT }}
+        run: |
+          test -n "$OPALE_PAY_SSH_PRIVATE_KEY" || { echo "Missing required secret: OPALE_PAY_SSH_PRIVATE_KEY"; exit 1; }
+          test -n "$OPALE_PAY_WG_PRIVATE_KEY" || { echo "Missing required secret: OPALE_PAY_WG_PRIVATE_KEY"; exit 1; }
+          test -n "$IFK_WG_PUBLIC_KEY" || { echo "Missing required secret: IFK_WG_PUBLIC_KEY"; exit 1; }
+          test -n "$IFK_WG_ENDPOINT" || { echo "Missing required variable or secret: IFK_WG_ENDPOINT"; exit 1; }
+
+      - name: Setup Terraform
+        if: inputs.target_ip == ''
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.0
+
+      - name: Terraform init
+        if: inputs.target_ip == ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+        run: |
+          terraform init \
+            -backend-config="endpoint=https://s3.pub2.infomaniak.cloud" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_s3_checksum=true" \
+            -backend-config="force_path_style=true"
+        working-directory: ./infra-pay
+
+      - name: Resolve target
+        id: target
+        env:
+          INPUT_TARGET_IP: ${{ inputs.target_ip }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TARGET_IP" ]; then
+            echo "ip=$INPUT_TARGET_IP" >> "$GITHUB_OUTPUT"
+            echo "ssh_port=2222" >> "$GITHUB_OUTPUT"
+            echo "ssh_user=ubuntu" >> "$GITHUB_OUTPUT"
+          else
+            cd infra-pay
+            echo "ip=$(terraform output -json instance_ip | jq -r '.')" >> "$GITHUB_OUTPUT"
+            echo "ssh_port=$(terraform output -json ssh_port | jq -r '.')" >> "$GITHUB_OUTPUT"
+            echo "ssh_user=$(terraform output -json ssh_user | jq -r '.')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install SSH key
+        env:
+          OPALE_PAY_SSH_PRIVATE_KEY: ${{ secrets.OPALE_PAY_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$OPALE_PAY_SSH_PRIVATE_KEY" > ~/.ssh/opale_pay
+          chmod 600 ~/.ssh/opale_pay
+
+      - name: Copy WireGuard configurator
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          SSH_PORT: ${{ steps.target.outputs.ssh_port }}
+          SSH_USER: ${{ steps.target.outputs.ssh_user }}
+        run: |
+          set -euo pipefail
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_pay -P "$SSH_PORT" \
+            scripts/configure-wireguard.sh \
+            "${SSH_USER}@${TARGET_IP}:/tmp/configure-wireguard.sh"
+
+      - name: Configure Opale Pay WireGuard peer
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          SSH_PORT: ${{ steps.target.outputs.ssh_port }}
+          SSH_USER: ${{ steps.target.outputs.ssh_user }}
+          OPALE_PAY_WG_ADDRESS: ${{ vars.OPALE_PAY_WG_ADDRESS || '10.77.0.2/32' }}
+          OPALE_PAY_WG_PRIVATE_KEY: ${{ secrets.OPALE_PAY_WG_PRIVATE_KEY }}
+          IFK_WG_PUBLIC_KEY: ${{ secrets.IFK_WG_PUBLIC_KEY }}
+          IFK_WG_ENDPOINT: ${{ vars.IFK_WG_ENDPOINT || secrets.IFK_WG_ENDPOINT }}
+          IFK_WG_ALLOWED_IPS: ${{ vars.IFK_WG_ALLOWED_IPS || '10.77.0.1/32' }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_pay -p "$SSH_PORT" "${SSH_USER}@${TARGET_IP}" \
+            "sudo sh /tmp/configure-wireguard.sh \
+              --interface wg0 \
+              --address '${OPALE_PAY_WG_ADDRESS}' \
+              --private-key '${OPALE_PAY_WG_PRIVATE_KEY}' \
+              --peer-public-key '${IFK_WG_PUBLIC_KEY}' \
+              --peer-allowed-ips '${IFK_WG_ALLOWED_IPS}' \
+              --peer-endpoint '${IFK_WG_ENDPOINT}' \
+              --persistent-keepalive 25"
+
+      - name: Verify WireGuard route to IFK
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          SSH_PORT: ${{ steps.target.outputs.ssh_port }}
+          SSH_USER: ${{ steps.target.outputs.ssh_user }}
+          IFK_WG_IP: ${{ vars.IFK_WG_IP || '10.77.0.1' }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_pay -p "$SSH_PORT" "${SSH_USER}@${TARGET_IP}" \
+            "ping -c 3 '${IFK_WG_IP}'"

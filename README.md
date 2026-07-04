@@ -31,6 +31,10 @@ edge-oracle/
   Caddyfile
   docker-compose.yml
   sites/
+ifk-bitcoind/
+  docker-compose.yml
+  README.md
+  wireguard.env.example
 infra-vault/
   main.tf
   variables.tf
@@ -191,6 +195,9 @@ on infrastructure changes because the hardening baseline is embedded into the VM
 
 `edge-oracle-deploy.yml` builds and deploys the shared Oracle public proxy as
 an infrastructure-owned artifact.
+
+`pay-wireguard-config.yml` configures the WireGuard peer on the Opale Pay VM so
+it can reach the IFK-hosted `bitcoind` RPC through a private tunnel.
 
 The intended delivery boundary is:
 

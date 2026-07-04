@@ -39,7 +39,8 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 resource "openstack_compute_instance_v2" "opale_pay" {
   name            = "${local.service_name}-${local.environment}"
   image_id        = data.openstack_images_image_v2.ubuntu.id
-  flavor_name     = "a2-ram4-disk50-perf1"
+  # Backend applicatif seul: bitcoind n'est plus hébergé sur cette VM.
+  flavor_name     = "a1-ram2-disk20-perf1"
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
   config_drive    = true

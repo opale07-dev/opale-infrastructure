@@ -1,0 +1,29 @@
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:28.0
+    container_name: opalepay-ifk-bitcoind
+    restart: unless-stopped
+    command:
+      - -testnet=1
+      - -server=1
+      - -rpcuser=${BITCOIN_RPC_USER:?BITCOIN_RPC_USER is required}
+      - -rpcpassword=${BITCOIN_RPC_PASSWORD:?BITCOIN_RPC_PASSWORD is required}
+      - -rpcallowip=${BITCOIN_RPC_ALLOW_IP:?BITCOIN_RPC_ALLOW_IP is required}
+      - -rpcbind=0.0.0.0
+      - -rpcport=${BITCOIN_RPC_PORT:-18332}
+      - -prune=${BITCOIN_PRUNE_MB:-550}
+      - -assumevalid=0
+    ports:
+      - "${BITCOIN_RPC_BIND:-127.0.0.1}:${BITCOIN_RPC_PORT:-18332}:${BITCOIN_RPC_PORT:-18332}"
+      - "${BITCOIN_P2P_BIND:-0.0.0.0}:${BITCOIN_P2P_PORT:-18333}:18333"
+    volumes:
+      - bitcoin_data:/home/bitcoin/.bitcoin
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -testnet -rpcconnect=127.0.0.1 -rpcport=${BITCOIN_RPC_PORT:-18332} -rpcuser=${BITCOIN_RPC_USER:?BITCOIN_RPC_USER is required} -rpcpassword=${BITCOIN_RPC_PASSWORD:?BITCOIN_RPC_PASSWORD is required} getblockchaininfo || exit 1"]
+      interval: 30s
+      timeout: 15s
+      start_period: 120s
+      retries: 20
+
+volumes:
+  bitcoin_data:
