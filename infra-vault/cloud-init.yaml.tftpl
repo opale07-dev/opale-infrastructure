@@ -1,0 +1,13 @@
+#cloud-config
+write_files:
+  - path: /usr/local/bin/harden-ubuntu-vps.sh
+    owner: root:root
+    permissions: "0755"
+    encoding: b64
+    content: |
+      ${harden_script_b64}
+runcmd:
+  - mkdir -p /usr/local/bin "${app_dir}" "${app_dir}/data"
+  - /usr/local/bin/harden-ubuntu-vps.sh --ssh-port ${ssh_port} --app-port ${vault_internal_port} --admin-user ${admin_user} --app-dir ${app_dir}
+  - touch "${app_dir}/.bootstrap-complete"
+  - chmod 640 "${app_dir}/.bootstrap-complete"

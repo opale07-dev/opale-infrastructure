@@ -8,7 +8,13 @@ on:
       - 'infra-vault/**'
       - 'scripts/**'
       - '.github/workflows/infra-deploy.yml'
-  workflow_dispatch: 
+  workflow_dispatch:
+    inputs:
+      confirm_replace:
+        description: "Type opale-vault-prod to APPLY (create or REPLACE the Vault VM). Replacing destroys the TPM-sealed master key: verify backups first. Empty = plan only."
+        required: false
+        default: ""
+        type: string
 
 jobs:
   terraform:
@@ -71,8 +77,10 @@ jobs:
         run: terraform plan
         working-directory: ./infra-vault
 
+      # L'apply est volontairement manuel : la VM Vault détient une clé maître
+      # scellée dans son vTPM, un remplacement implicite sur push serait destructif.
       - name: Terraform Apply
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
           OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
@@ -93,6 +101,7 @@ jobs:
         working-directory: ./infra-vault
 
       - name: Get Instance IP from Terraform
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
         id: get_ip
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
@@ -103,7 +112,7 @@ jobs:
         working-directory: ./infra-vault
 
       - name: Publish backend target to opale-core
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
         env:
           GH_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
           BACKEND_IP: ${{ steps.get_ip.outputs.ip }}
@@ -114,6 +123,13 @@ jobs:
           gh secret set VAULT_BACKEND_URL --repo opale07-dev/opale-core --body "https://${BACKEND_IP}:8443"
 
       - name: Summarize backend bootstrap
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
         run: |
           echo "Vault backend VM provisioned at ${{ steps.get_ip.outputs.ip }}"
           echo "Backend bootstrap/deploy is handled by opale-core."
+
+      - name: Summarize plan-only run
+        if: github.event_name == 'push' || github.event.inputs.confirm_replace != 'opale-vault-prod'
+        run: |
+          echo "Plan-only run: no apply performed."
+          echo "To create/replace the Vault VM, dispatch this workflow with confirm_replace=opale-vault-prod."

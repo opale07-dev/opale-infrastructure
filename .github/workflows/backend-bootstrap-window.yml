@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       bootstrap_cidr:
-        description: "Temporary CIDR allowed to reach the Alpine initial SSH port 22. Empty closes the window."
+        description: "Temporary CIDR allowed to reach the image's initial SSH port 22. Empty closes the window."
         required: false
         default: ""
 

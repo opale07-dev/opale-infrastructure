@@ -21,6 +21,8 @@ locals {
   vault_internal_port = 8443
   service_name        = "opale-vault"
   environment         = "prod"
+  admin_user          = "ubuntu"
+  app_dir             = "/opt/opale-vault"
 }
 
 # Configuration du Provider (Infomaniak utilise OpenStack)
@@ -28,9 +30,10 @@ provider "openstack" {
   # Les identifiants seront injectés via tes variables d'environnement OpenRC
 }
 
-# 1. Récupération de l'image Alpine
-data "openstack_images_image_v2" "alpine" {
-  name        = "Alpine Linux 3" # Vérifie le nom exact dans ton manager si besoin
+# 1. Récupération de l'image Ubuntu LTS (doctrine DevOps : Ubuntu LTS minimal
+# pour les VM Opale ; Alpine est un déclencheur de drift)
+data "openstack_images_image_v2" "ubuntu" {
+  name_regex  = "^Ubuntu 26\\.04.*LTS.*"
   most_recent = true
 }
 
@@ -43,10 +46,18 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 # 3. Création de l'instance avec activation du vTPM
 resource "openstack_compute_instance_v2" "opale_vault" {
   name            = "${local.service_name}-${local.environment}"
-  image_id        = data.openstack_images_image_v2.alpine.id
+  image_id        = data.openstack_images_image_v2.ubuntu.id
   flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
+  config_drive    = true
+  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
+    admin_user          = local.admin_user
+    app_dir             = local.app_dir
+    ssh_port            = local.ssh_port
+    vault_internal_port = local.vault_internal_port
+    harden_script_b64   = filebase64("${path.module}/../scripts/harden-ubuntu-vps.sh")
+  })
 
   lifecycle {
     ignore_changes = [user_data]

@@ -1,0 +1,47 @@
+name: "Opale Vault Server Delete"
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_id:
+        description: "Exact OpenStack server ID to delete (use vault-server-list/show first)"
+        required: true
+        type: string
+      confirm:
+        description: "Type DELETE-VAULT-VM to confirm. The legacy Alpine VM holds the TPM-sealed master key: verify backups before deleting."
+        required: true
+        type: string
+
+jobs:
+  server-delete:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate confirmation
+        env:
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "DELETE-VAULT-VM" ]; then
+            echo "Confirmation mismatch: expected DELETE-VAULT-VM. Aborting."
+            exit 1
+          fi
+
+      - name: Install OpenStack Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      - name: Delete Opale Vault server
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          openstack server delete "${{ github.event.inputs.server_id }}"
+          echo "Server ${{ github.event.inputs.server_id }} deleted."

@@ -54,3 +54,11 @@ docker-compose.override.yml
 reports/
 audit-output/
 sbom/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!*.tfvars.example

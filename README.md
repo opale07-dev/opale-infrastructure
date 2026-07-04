@@ -35,19 +35,56 @@ infra-vault/
   main.tf
   variables.tf
   outputs.tf
+  cloud-init.yaml.tftpl
 infra-pay/
   main.tf
   variables.tf
   outputs.tf
+  cloud-init.yaml.tftpl
+infra-data/
+  main.tf
+  variables.tf
+  outputs.tf
+  cloud-init.yaml.tftpl
 scripts/
-  harden-alpine-vps.sh
+  harden-ubuntu-vps.sh
+  harden-alpine-vps.sh   # legacy, kept until the Alpine Vault VM is retired
   opale-vault-sync.sh
 .github/workflows/
-  infra-deploy.yml
-  vps-control.yml
+  infra-deploy.yml           # vault: plan on push, apply via dispatch + confirm
   infra-deploy-pay.yml
+  infra-deploy-data.yml
+  edge-oracle-deploy.yml
+  vault-server-list.yml
+  vault-server-show.yml
+  vault-server-delete.yml    # manual, double-confirmed
+  pay-server-list.yml
+  pay-server-show.yml
+  pay-server-delete.yml
+  vps-control.yml
   vps-control-pay.yml
+  backend-bootstrap-window.yml
 ```
+
+## Vault VM Migration (Alpine → Ubuntu)
+
+`infra-vault` provisions Ubuntu LTS with vTPM and cloud-init hardening, per the
+DevOps doctrine. The legacy Alpine VM is replaced through an explicit,
+human-driven sequence — never implicitly on push:
+
+1. Verify Vault backups (the master key is sealed in the old VM's vTPM and
+   cannot be migrated; only the backup/restore path survives the VM).
+2. `vault-server-list` / `vault-server-show`: identify the Alpine server ID.
+3. `vault-server-delete` with the ID and the `DELETE-VAULT-VM` confirmation —
+   or skip and let Terraform plan a replacement.
+4. Dispatch `infra-deploy.yml` with `confirm_replace=opale-vault-prod`: creates
+   the Ubuntu VM (vTPM, cloud-init hardening) and publishes the new IP to
+   `opale-core` secrets.
+5. Open a bootstrap SSH window via `backend-bootstrap-window.yml` if needed,
+   deploy the backend from `opale-core`, restore from backup, re-init the TPM
+   seal.
+
+Pushes touching `infra-vault/**` only run `terraform plan`.
 
 ## Conventions
 

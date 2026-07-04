@@ -9,6 +9,32 @@ are used until the first public version.
 
 ## [Unreleased]
 
+### Added
+
+- `infra-vault/cloud-init.yaml.tftpl`: first-boot Ubuntu hardening for the
+  Vault VM (same pattern as pay/data).
+- `vault-server-list.yml`, `vault-server-show.yml`, `vault-server-delete.yml`:
+  manual OpenStack server operations for the Vault VM; delete requires the
+  `DELETE-VAULT-VM` confirmation.
+
+### Changed
+
+- `infra-vault` migrated from Alpine Linux 3 to Ubuntu LTS minimal per the
+  DevOps doctrine (vTPM metadata preserved, config_drive enabled).
+- `infra-deploy.yml`: push now runs `terraform plan` only; apply requires a
+  manual dispatch with `confirm_replace=opale-vault-prod`.
+
+### Security
+
+- Replacing the Vault VM destroys the TPM-sealed master key: the apply and
+  delete paths are gated behind explicit confirmations, and the migration
+  runbook (README "Vault VM Migration") requires verified backups first.
+
+### Operational Notes
+
+- Next `terraform apply` on `infra-vault` will plan a **replacement** of
+  `opale-vault-prod` (image change). Follow the migration runbook.
+
 ## [internal-2026-07-05] - 2026-07-05
 
 ### Added
