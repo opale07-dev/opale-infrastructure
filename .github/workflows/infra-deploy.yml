@@ -37,6 +37,19 @@ jobs:
           test -n "$SSH_PUBLIC_KEY" || { echo "Missing required secret: SSH_PUBLIC_KEY"; exit 1; }
           test -n "$OPALE_GLOBAL_PAT" || { echo "Missing required secret: OPALE_GLOBAL_PAT"; exit 1; }
 
+      # Le vTPM est OBLIGATOIRE pour le Vault et n'existe que dans dc4-a chez
+      # Infomaniak. On refuse toute action Terraform hors de cette region.
+      - name: Enforce vTPM region (dc4-a)
+        env:
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+        run: |
+          if [ "$OS_REGION_NAME" != "dc4-a" ]; then
+            echo "ERREUR: le vTPM exige la region dc4-a; la region configuree est differente."
+            echo "Migrer le projet/les credentials OpenStack vers dc4-a avant tout deploiement Vault."
+            exit 1
+          fi
+          echo "Region dc4-a confirmee: vTPM disponible."
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
