@@ -66,7 +66,26 @@ run "apt-get update -qq"
 run "apt-get upgrade -y -qq"
 
 log "Installing security and runtime packages"
-run "apt-get install -y -qq auditd ca-certificates curl docker.io docker-compose-plugin fail2ban jq openssh-server ufw unattended-upgrades"
+run "apt-get install -y -qq auditd ca-certificates curl docker.io fail2ban jq openssh-server ufw unattended-upgrades"
+
+install_package_if_available() {
+  package_name="$1"
+  if apt-cache show "$package_name" >/dev/null 2>&1; then
+    run "apt-get install -y -qq ${package_name}"
+    return 0
+  fi
+  return 1
+}
+
+log "Installing Docker Compose v2"
+# docker-compose-v2 est le paquet Ubuntu (>= 24.04) fournissant le plugin
+# `docker compose`; docker-compose-plugin n'existe que dans le depot Docker
+# officiel. Le classique docker-compose v1 est abandonne et incompatible avec
+# nos scripts (`docker compose ...`), donc jamais utilise comme fallback.
+if ! install_package_if_available docker-compose-v2; then
+  install_package_if_available docker-compose-plugin || true
+fi
+run "docker compose version"
 
 log "Applying SSH hardening"
 SSH_CONF="/etc/ssh/sshd_config.d/99-opale-hardening.conf"
