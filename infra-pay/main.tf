@@ -73,6 +73,19 @@ resource "openstack_compute_secgroup_v2" "secgroup_opale" {
     cidr        = var.admin_cidr
   }
 
+  dynamic "rule" {
+    for_each = trimspace(var.deploy_ssh_cidr) == "" ? [] : [
+      var.deploy_ssh_cidr
+    ]
+
+    content {
+      from_port   = local.ssh_port
+      to_port     = local.ssh_port
+      ip_protocol = "tcp"
+      cidr        = rule.value
+    }
+  }
+
   rule {
     from_port   = local.pay_internal_port
     to_port     = local.pay_internal_port

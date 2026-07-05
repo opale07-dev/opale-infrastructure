@@ -11,6 +11,9 @@ are used until the first public version.
 
 ### Added
 
+- `pay-backend-bootstrap-window.yml`: Opale Pay backend deploys can now open
+  and close temporary GitHub Actions SSH access to the VM through Terraform on
+  the hardened port `2222`.
 - `infra-vault/cloud-init.yaml.tftpl`: first-boot Ubuntu hardening for the
   Vault VM (same pattern as pay/data).
 - `vault-server-list.yml`, `vault-server-show.yml`, `vault-server-delete.yml`:
@@ -55,6 +58,8 @@ are used until the first public version.
 - `pay-wireguard-config.yml`: the workflow now opens a temporary SSH rule for
   the GitHub runner CIDR on `opale-pay-secgroup`, applies WireGuard, verifies
   IFK reachability, and removes the rule in cleanup.
+- `infra-pay`: added `deploy_ssh_cidr` so product CI can deploy over the
+  standard hardened SSH port without owning OpenStack security-group logic.
 
 ### Security
 

@@ -22,3 +22,14 @@ variable "pay_allowed_cidr" {
     error_message = "pay_allowed_cidr must be a non-empty valid CIDR (example: 198.51.100.20/32)."
   }
 }
+
+variable "deploy_ssh_cidr" {
+  type        = string
+  description = "Temporary CIDR allowed to reach the hardened SSH port 2222 during GitHub Actions deployments. Empty disables the rule."
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.deploy_ssh_cidr) == "" || can(cidrhost(var.deploy_ssh_cidr, 0))
+    error_message = "deploy_ssh_cidr must be empty or a valid CIDR (example: 203.0.113.10/32)."
+  }
+}
