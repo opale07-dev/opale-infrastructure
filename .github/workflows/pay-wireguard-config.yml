@@ -85,6 +85,40 @@ jobs:
           printf '%s\n' "$OPALE_PAY_SSH_PRIVATE_KEY" > ~/.ssh/opale_pay
           chmod 600 ~/.ssh/opale_pay
 
+      - name: Resolve runner SSH CIDR
+        id: runner_ssh_cidr
+        run: |
+          set -euo pipefail
+          echo "cidr=$(curl -fsS https://api.ipify.org)/32" >> "$GITHUB_OUTPUT"
+
+      - name: Install OpenStack Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      - name: Open temporary SSH access from runner
+        id: ssh_rule
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+          SSH_PORT: ${{ steps.target.outputs.ssh_port }}
+          RUNNER_CIDR: ${{ steps.runner_ssh_cidr.outputs.cidr }}
+        run: |
+          set -euo pipefail
+          RULE_ID=$(openstack security group rule create opale-pay-secgroup \
+            --protocol tcp \
+            --dst-port "${SSH_PORT}:${SSH_PORT}" \
+            --remote-ip "$RUNNER_CIDR" \
+            -f value -c id)
+          echo "id=$RULE_ID" >> "$GITHUB_OUTPUT"
+
       - name: Copy WireGuard configurator
         env:
           TARGET_IP: ${{ steps.target.outputs.ip }}
@@ -128,3 +162,32 @@ jobs:
           set -euo pipefail
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_pay -p "$SSH_PORT" "${SSH_USER}@${TARGET_IP}" \
             "ping -c 3 '${IFK_WG_IP}'"
+
+      - name: Verify bitcoind RPC listener over WireGuard
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          SSH_PORT: ${{ steps.target.outputs.ssh_port }}
+          SSH_USER: ${{ steps.target.outputs.ssh_user }}
+          IFK_WG_IP: ${{ vars.IFK_WG_IP || '10.77.0.1' }}
+          BITCOIN_RPC_PORT: ${{ vars.BITCOIN_RPC_PORT || '18332' }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_pay -p "$SSH_PORT" "${SSH_USER}@${TARGET_IP}" \
+            "curl -fsS --max-time 5 --connect-timeout 3 'http://${IFK_WG_IP}:${BITCOIN_RPC_PORT}/' >/dev/null || test \"\$?\" = 22"
+
+      - name: Close temporary SSH access from runner
+        if: always() && steps.ssh_rule.outputs.id != ''
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+          RULE_ID: ${{ steps.ssh_rule.outputs.id }}
+        run: |
+          set -euo pipefail
+          openstack security group rule delete "$RULE_ID" || true

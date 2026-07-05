@@ -52,6 +52,9 @@ are used until the first public version.
 - `ifk-bitcoind-config.yml` and `scripts/apply-ifk-bitcoind.sh`: IFK WireGuard
   and `bitcoind` host configuration are now applied from versioned
   infrastructure scripts through GitHub Actions instead of manual SSH steps.
+- `pay-wireguard-config.yml`: the workflow now opens a temporary SSH rule for
+  the GitHub runner CIDR on `opale-pay-secgroup`, applies WireGuard, verifies
+  IFK reachability, and removes the rule in cleanup.
 
 ### Security
 
