@@ -53,6 +53,10 @@ core.gmlabs.ch {
 		reverse_proxy opale-vault-frontend:80
 	}
 
+	handle_path /pay* {
+		reverse_proxy opale-pay-frontend:80
+	}
+
 	handle {
 		reverse_proxy opale-vault-frontend:80
 	}
@@ -64,6 +68,10 @@ core.gmlabs.ch {
 
 	handle_path /vault* {
 		reverse_proxy opale-vault-frontend:80
+	}
+
+	handle_path /pay* {
+		reverse_proxy opale-pay-frontend:80
 	}
 
 	handle {

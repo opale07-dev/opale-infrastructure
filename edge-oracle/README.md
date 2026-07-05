@@ -22,7 +22,9 @@ It is not responsible for:
 
 - Shared public proxy container: `opale-oracle-edge-proxy`
 - Shared external Docker network: `opale-edge`
-- Current routed frontend container: `opale-vault-frontend`
+- Current routed frontend containers:
+  - `/vault` and default route: `opale-vault-frontend`
+  - `/pay`: `opale-pay-frontend`
 - Public hostname: `core.gmlabs.ch`
 
 ## Required GitHub Secrets
