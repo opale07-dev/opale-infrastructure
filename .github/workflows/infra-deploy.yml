@@ -9,12 +9,9 @@ on:
       - 'scripts/**'
       - '.github/workflows/infra-deploy.yml'
   workflow_dispatch:
-    inputs:
-      confirm_replace:
-        description: "Type opale-vault-prod to APPLY (create or REPLACE the Vault VM). Replacing destroys the TPM-sealed master key: verify backups first. Empty = plan only."
-        required: false
-        default: ""
-        type: string
+
+env:
+  VAULT_OPENSTACK_REGION: dc4-a
 
 jobs:
   terraform:
@@ -37,18 +34,36 @@ jobs:
           test -n "$SSH_PUBLIC_KEY" || { echo "Missing required secret: SSH_PUBLIC_KEY"; exit 1; }
           test -n "$OPALE_GLOBAL_PAT" || { echo "Missing required secret: OPALE_GLOBAL_PAT"; exit 1; }
 
-      # Le vTPM est OBLIGATOIRE pour le Vault et n'existe que dans dc4-a chez
-      # Infomaniak. On refuse toute action Terraform hors de cette region.
-      - name: Enforce vTPM region (dc4-a)
-        env:
-          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+      - name: Install OpenStack Client
         run: |
-          if [ "$OS_REGION_NAME" != "dc4-a" ]; then
-            echo "ERREUR: le vTPM exige la region dc4-a; la region configuree est differente."
-            echo "Migrer le projet/les credentials OpenStack vers dc4-a avant tout deploiement Vault."
-            exit 1
-          fi
-          echo "Region dc4-a confirmee: vTPM disponible."
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      # Le vTPM est OBLIGATOIRE pour le Vault et n'existe que dans dc4-a chez
+      # Infomaniak. Le workflow force cette region pour Terraform et valide
+      # le service catalog OpenStack reel avant tout plan/apply.
+      - name: Validate OpenStack target region
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          set -euo pipefail
+          openstack token issue -f value -c id >/dev/null
+          for service in compute image network; do
+            if ! openstack endpoint list --service "$service" --region "$OS_REGION_NAME" -f value -c ID | grep -q .; then
+              echo "ERREUR: aucun endpoint OpenStack '$service' visible en region $OS_REGION_NAME."
+              echo "Le Vault exige dc4-a pour le vTPM; verifier les credentials/projet Infomaniak."
+              exit 1
+            fi
+          done
+          echo "OpenStack catalog valide pour $OS_REGION_NAME (compute/image/network)."
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -79,7 +94,7 @@ jobs:
           OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
           OS_USERNAME: ${{ secrets.OS_USERNAME }}
           OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
-          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
           OS_IDENTITY_API_VERSION: "3"
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
@@ -90,10 +105,8 @@ jobs:
         run: terraform plan
         working-directory: ./infra-vault
 
-      # L'apply est volontairement manuel : la VM Vault détient une clé maître
-      # scellée dans son vTPM, un remplacement implicite sur push serait destructif.
       - name: Terraform Apply
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
+        if: github.ref == 'refs/heads/main'
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
           OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
@@ -102,7 +115,7 @@ jobs:
           OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
           OS_USERNAME: ${{ secrets.OS_USERNAME }}
           OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
-          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
           OS_IDENTITY_API_VERSION: "3"
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
@@ -114,7 +127,7 @@ jobs:
         working-directory: ./infra-vault
 
       - name: Get Instance IP from Terraform
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
+        if: github.ref == 'refs/heads/main'
         id: get_ip
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
@@ -125,7 +138,7 @@ jobs:
         working-directory: ./infra-vault
 
       - name: Publish backend target to opale-core
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
           BACKEND_IP: ${{ steps.get_ip.outputs.ip }}
@@ -136,13 +149,7 @@ jobs:
           gh secret set VAULT_BACKEND_URL --repo opale07-dev/opale-core --body "https://${BACKEND_IP}:8443"
 
       - name: Summarize backend bootstrap
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_replace == 'opale-vault-prod'
+        if: github.ref == 'refs/heads/main'
         run: |
           echo "Vault backend VM provisioned at ${{ steps.get_ip.outputs.ip }}"
           echo "Backend bootstrap/deploy is handled by opale-core."
-
-      - name: Summarize plan-only run
-        if: github.event_name == 'push' || github.event.inputs.confirm_replace != 'opale-vault-prod'
-        run: |
-          echo "Plan-only run: no apply performed."
-          echo "To create/replace the Vault VM, dispatch this workflow with confirm_replace=opale-vault-prod."

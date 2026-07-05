@@ -87,9 +87,11 @@ resource "openstack_compute_instance_v2" "opale_vault" {
   })
 
   lifecycle {
+    prevent_destroy = true
+
     # image_id est ignoré pour qu'une nouvelle image "most_recent" ne déclenche
     # jamais un remplacement implicite de la VM (ex: apply de la fenêtre SSH).
-    # Migration d'image = décision explicite via terraform apply -replace.
+    # Migration d'image = opération explicite hors pipeline automatique.
     ignore_changes = [user_data, image_id]
   }
 

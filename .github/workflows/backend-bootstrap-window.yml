@@ -12,6 +12,9 @@ concurrency:
   group: vault-backend-bootstrap-window
   cancel-in-progress: false
 
+env:
+  VAULT_OPENSTACK_REGION: dc4-a
+
 jobs:
   apply:
     name: "Apply Bootstrap SSH Window"
@@ -61,7 +64,7 @@ jobs:
           OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
           OS_USERNAME: ${{ secrets.OS_USERNAME }}
           OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
-          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
           OS_IDENTITY_API_VERSION: "3"
           AWS_ACCESS_KEY_ID: ${{ secrets.INFOMANIAK_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.INFOMANIAK_S3_SECRET_KEY }}
