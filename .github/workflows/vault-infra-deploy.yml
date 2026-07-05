@@ -41,7 +41,7 @@ jobs:
 
       # Le vTPM est OBLIGATOIRE pour le Vault et n'existe que dans dc4-a chez
       # Infomaniak. Le workflow force cette region pour Terraform et valide
-      # le service catalog OpenStack reel avant tout plan/apply.
+      # les APIs projet OpenStack avant tout plan/apply, sans droit admin Keystone.
       - name: Validate OpenStack target region
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
@@ -56,14 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           openstack token issue -f value -c id >/dev/null
-          for service in compute image network; do
-            if ! openstack endpoint list --service "$service" --region "$OS_REGION_NAME" -f value -c ID | grep -q .; then
-              echo "ERREUR: aucun endpoint OpenStack '$service' visible en region $OS_REGION_NAME."
-              echo "Le Vault exige dc4-a pour le vTPM; verifier les credentials/projet Infomaniak."
-              exit 1
-            fi
-          done
-          echo "OpenStack catalog valide pour $OS_REGION_NAME (compute/image/network)."
+          openstack server list --limit 1 >/dev/null
+          openstack image list --limit 1 >/dev/null
+          openstack network list --limit 1 >/dev/null
+          echo "OpenStack APIs accessibles pour $OS_REGION_NAME (compute/image/network)."
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
