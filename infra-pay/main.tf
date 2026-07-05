@@ -39,8 +39,7 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 resource "openstack_compute_instance_v2" "opale_pay" {
   name            = "${local.service_name}-${local.environment}"
   image_id        = data.openstack_images_image_v2.ubuntu.id
-  # Ubuntu 26.04 images currently require a 50 GB minimum root disk.
-  flavor_name     = "a2-ram4-disk50-perf1"
+  flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM / 20 Go disk
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
   config_drive    = true
@@ -53,7 +52,9 @@ resource "openstack_compute_instance_v2" "opale_pay" {
   })
 
   lifecycle {
-    ignore_changes = [user_data]
+    # image_id is ignored so a newer "most_recent" Ubuntu image never triggers
+    # an implicit VM replacement during routine applies.
+    ignore_changes = [user_data, image_id]
   }
 
   network {

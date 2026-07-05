@@ -43,6 +43,15 @@ are used until the first public version.
   DevOps doctrine (vTPM metadata preserved, config_drive enabled).
 - `infra-deploy.yml`: push now runs `terraform plan` only; apply requires a
   manual dispatch with `confirm_replace=opale-vault-prod`.
+- `infra-pay`: backend VM sizing is aligned with Vault on
+  `a1-ram2-disk20-perf1` (1 vCPU / 2 Go RAM / 20 Go disk), and routine applies
+  ignore `image_id` drift from the `most_recent` Ubuntu lookup.
+- `harden-ubuntu-vps.sh`: Docker Compose package installation is now tolerant
+  of Ubuntu repository/package-name drift, so SSH hardening can complete even
+  when `docker-compose-plugin` is unavailable in the image's apt sources.
+- `ifk-bitcoind-config.yml` and `scripts/apply-ifk-bitcoind.sh`: IFK WireGuard
+  and `bitcoind` host configuration are now applied from versioned
+  infrastructure scripts through GitHub Actions instead of manual SSH steps.
 
 ### Security
 
