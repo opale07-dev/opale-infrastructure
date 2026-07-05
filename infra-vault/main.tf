@@ -30,11 +30,24 @@ provider "openstack" {
   # Les identifiants seront injectés via tes variables d'environnement OpenRC
 }
 
-# 1. Récupération de l'image Ubuntu LTS (doctrine DevOps : Ubuntu LTS minimal
-# pour les VM Opale ; Alpine est un déclencheur de drift)
-data "openstack_images_image_v2" "ubuntu" {
-  name_regex  = "^Ubuntu 26\\.04.*LTS.*"
-  most_recent = true
+# 1. Image privée Ubuntu LTS avec vTPM (doctrine DevOps : Ubuntu LTS minimal).
+# Les propriétés hw_tpm_* doivent être portées par l'IMAGE (impossible sur
+# l'image publique Infomaniak) — les poser en metadata d'instance ne fait rien.
+# tpm-crb est le modèle recommandé pour TPM 2.0. vTPM exige la région dc4-a.
+# Si l'import web_download échoue chez Glance, retirer `web_download` pour
+# laisser le provider télécharger puis uploader l'image.
+resource "openstack_images_image_v2" "ubuntu_tpm" {
+  name             = "opale-ubuntu-26.04-tpm"
+  image_source_url = "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img"
+  container_format = "bare"
+  disk_format      = "qcow2"
+  visibility       = "private"
+  web_download     = true
+
+  properties = {
+    hw_tpm_version = "2.0"
+    hw_tpm_model   = "tpm-crb"
+  }
 }
 
 # 2. Définition de la clé SSH pour l'accès bare-metal
@@ -46,7 +59,7 @@ resource "openstack_compute_keypair_v2" "opale_key" {
 # 3. Création de l'instance avec activation du vTPM
 resource "openstack_compute_instance_v2" "opale_vault" {
   name            = "${local.service_name}-${local.environment}"
-  image_id        = data.openstack_images_image_v2.ubuntu.id
+  image_id        = openstack_images_image_v2.ubuntu_tpm.id
   flavor_name     = "a1-ram2-disk20-perf1" # 1 vCPU / 2 Go RAM
   key_pair        = openstack_compute_keypair_v2.opale_key.name
   security_groups = [openstack_compute_secgroup_v2.secgroup_opale.name]
@@ -66,11 +79,8 @@ resource "openstack_compute_instance_v2" "opale_vault" {
     ignore_changes = [user_data, image_id]
   }
 
-  # C'est ici qu'on force OpenStack à émuler la puce TPM 2.0 pour le Vault
-  metadata = {
-    "hw_tpm_version" = "2.0"
-    "hw_tpm_model"   = "tpm-tis"
-  }
+  # NB: ne PAS mettre hw_tpm_* ici — en metadata d'instance, Nova les ignore.
+  # Le vTPM vient des propriétés de l'image privée ubuntu_tpm ci-dessus.
 
   network {
     name = "ext-net1" # Le nom du réseau public chez Infomaniak pour avoir une IP
