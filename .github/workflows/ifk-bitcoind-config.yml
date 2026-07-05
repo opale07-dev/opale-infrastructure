@@ -1,0 +1,116 @@
+name: "IFK - Configure Opale Pay bitcoind"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ifk-bitcoind-config
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Preflight required values
+        env:
+          IFK_SSH_PRIVATE_KEY: ${{ secrets.IFK_SSH_PRIVATE_KEY }}
+          IFK_WG_PRIVATE_KEY: ${{ secrets.IFK_WG_PRIVATE_KEY }}
+          OPALE_PAY_WG_PUBLIC_KEY: ${{ secrets.OPALE_PAY_WG_PUBLIC_KEY }}
+          BITCOIN_RPC_USER: ${{ secrets.BITCOIN_RPC_USER }}
+          BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$IFK_SSH_PRIVATE_KEY" || { echo "Missing required secret: IFK_SSH_PRIVATE_KEY"; exit 1; }
+          test -n "$IFK_WG_PRIVATE_KEY" || { echo "Missing required secret: IFK_WG_PRIVATE_KEY"; exit 1; }
+          test -n "$OPALE_PAY_WG_PUBLIC_KEY" || { echo "Missing required secret: OPALE_PAY_WG_PUBLIC_KEY"; exit 1; }
+          test -n "$BITCOIN_RPC_USER" || { echo "Missing required secret: BITCOIN_RPC_USER"; exit 1; }
+          test -n "$BITCOIN_RPC_PASSWORD" || { echo "Missing required secret: BITCOIN_RPC_PASSWORD"; exit 1; }
+
+      - name: Install SSH key
+        env:
+          IFK_SSH_PRIVATE_KEY: ${{ secrets.IFK_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$IFK_SSH_PRIVATE_KEY" > ~/.ssh/ifk
+          chmod 600 ~/.ssh/ifk
+
+      - name: Build IFK env file
+        env:
+          IFK_WG_ADDRESS: ${{ vars.IFK_WG_ADDRESS || '10.77.0.1/24' }}
+          IFK_WG_LISTEN_PORT: ${{ vars.IFK_WG_LISTEN_PORT || '51820' }}
+          IFK_WG_PRIVATE_KEY: ${{ secrets.IFK_WG_PRIVATE_KEY }}
+          OPALE_PAY_WG_PUBLIC_KEY: ${{ secrets.OPALE_PAY_WG_PUBLIC_KEY }}
+          OPALE_PAY_WG_ALLOWED_IPS: ${{ vars.OPALE_PAY_WG_ALLOWED_IPS || '10.77.0.2/32' }}
+          BITCOIN_RPC_BIND: ${{ vars.BITCOIN_RPC_BIND || '10.77.0.1' }}
+          BITCOIN_RPC_ALLOW_IP: ${{ vars.BITCOIN_RPC_ALLOW_IP || '10.77.0.2/32' }}
+          BITCOIN_RPC_PORT: ${{ vars.BITCOIN_RPC_PORT || '18332' }}
+          BITCOIN_RPC_USER: ${{ secrets.BITCOIN_RPC_USER }}
+          BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
+          BITCOIN_PRUNE_MB: ${{ vars.BITCOIN_PRUNE_MB || '550' }}
+          BITCOIN_P2P_BIND: ${{ vars.BITCOIN_P2P_BIND || '0.0.0.0' }}
+          BITCOIN_P2P_PORT: ${{ vars.BITCOIN_P2P_PORT || '18333' }}
+        run: |
+          set -euo pipefail
+          umask 077
+          quote() {
+            printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+          }
+          append_env() {
+            key="$1"
+            value="$2"
+            printf '%s=' "$key" >> /tmp/ifk-bitcoind.env
+            quote "$value" >> /tmp/ifk-bitcoind.env
+            printf '\n' >> /tmp/ifk-bitcoind.env
+          }
+          : > /tmp/ifk-bitcoind.env
+          append_env IFK_WG_ADDRESS "$IFK_WG_ADDRESS"
+          append_env IFK_WG_LISTEN_PORT "$IFK_WG_LISTEN_PORT"
+          append_env IFK_WG_PRIVATE_KEY "$IFK_WG_PRIVATE_KEY"
+          append_env OPALE_PAY_WG_PUBLIC_KEY "$OPALE_PAY_WG_PUBLIC_KEY"
+          append_env OPALE_PAY_WG_ALLOWED_IPS "$OPALE_PAY_WG_ALLOWED_IPS"
+          append_env BITCOIN_RPC_BIND "$BITCOIN_RPC_BIND"
+          append_env BITCOIN_RPC_ALLOW_IP "$BITCOIN_RPC_ALLOW_IP"
+          append_env BITCOIN_RPC_PORT "$BITCOIN_RPC_PORT"
+          append_env BITCOIN_RPC_USER "$BITCOIN_RPC_USER"
+          append_env BITCOIN_RPC_PASSWORD "$BITCOIN_RPC_PASSWORD"
+          append_env BITCOIN_PRUNE_MB "$BITCOIN_PRUNE_MB"
+          append_env BITCOIN_P2P_BIND "$BITCOIN_P2P_BIND"
+          append_env BITCOIN_P2P_PORT "$BITCOIN_P2P_PORT"
+
+      - name: Copy IFK artifacts
+        env:
+          IFK_SSH_HOST: ${{ vars.IFK_SSH_HOST || '179.237.65.168' }}
+          IFK_SSH_PORT: ${{ vars.IFK_SSH_PORT || '2222' }}
+          IFK_SSH_USER: ${{ vars.IFK_SSH_USER || 'ubuntu' }}
+        run: |
+          set -euo pipefail
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ifk -P "$IFK_SSH_PORT" \
+            scripts/configure-wireguard.sh \
+            scripts/apply-ifk-bitcoind.sh \
+            ifk-bitcoind/docker-compose.yml \
+            /tmp/ifk-bitcoind.env \
+            "${IFK_SSH_USER}@${IFK_SSH_HOST}:/tmp/"
+
+      - name: Apply IFK bitcoind configuration
+        env:
+          IFK_SSH_HOST: ${{ vars.IFK_SSH_HOST || '179.237.65.168' }}
+          IFK_SSH_PORT: ${{ vars.IFK_SSH_PORT || '2222' }}
+          IFK_SSH_USER: ${{ vars.IFK_SSH_USER || 'ubuntu' }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ifk -p "$IFK_SSH_PORT" "${IFK_SSH_USER}@${IFK_SSH_HOST}" \
+            "sudo install -m 0755 -o root -g root /tmp/configure-wireguard.sh /usr/local/bin/opale-configure-wireguard && \
+             sudo install -m 0755 -o root -g root /tmp/apply-ifk-bitcoind.sh /usr/local/bin/opale-apply-ifk-bitcoind && \
+             sudo install -d -m 0750 -o root -g ubuntu /etc/opale && \
+             sudo install -m 0640 -o root -g ubuntu /tmp/ifk-bitcoind.env /etc/opale/ifk-bitcoind.env && \
+             sudo install -d -m 0750 -o ubuntu -g ubuntu /opt/opale/ifk-bitcoind && \
+             sudo install -m 0640 -o ubuntu -g ubuntu /tmp/docker-compose.yml /opt/opale/ifk-bitcoind/docker-compose.yml && \
+             sudo /usr/local/bin/opale-apply-ifk-bitcoind"
