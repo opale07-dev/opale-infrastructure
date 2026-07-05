@@ -1,4 +1,4 @@
-name: "Opale Pay VM Console Log"
+name: "Pay / VM Console Log"
 
 on:
   workflow_dispatch:

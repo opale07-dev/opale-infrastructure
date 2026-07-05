@@ -1,4 +1,4 @@
-name: "Vault VM Console Log"
+name: "Vault / VM Console Log"
 
 on:
   workflow_dispatch:

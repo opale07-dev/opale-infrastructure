@@ -1,4 +1,4 @@
-name: "Opale Pay Server Show"
+name: "Pay / Server Show"
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: "Opale Pay - Backend SSH Window"
+name: "Pay / Backend SSH Window"
 
 on:
   workflow_dispatch:

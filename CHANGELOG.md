@@ -21,7 +21,7 @@ are used until the first public version.
   extract) and installable on an existing VM via
   `scripts/opale-maintenance-remote.sh`. No maintenance job ever pulls
   application code/images.
-- `pay-backend-bootstrap-window.yml`: Opale Pay backend deploys can now open
+- `pay-backend-ssh-window.yml`: Opale Pay backend deploys can now open
   and close temporary GitHub Actions SSH access to the VM through Terraform on
   the hardened port `2222`.
 - `infra-vault/cloud-init.yaml.tftpl`: first-boot Ubuntu hardening for the
@@ -38,7 +38,7 @@ are used until the first public version.
 - `edge-oracle-deploy.yml`: the deploy now removes any legacy container still
   publishing 80/443 (e.g. `opale-vault-proxy-1`) before starting the shared
   edge proxy — first deploy failed with "Bind for 0.0.0.0:443 failed".
-- `backend-bootstrap-window.yml`: fixed stale `working-directory: ./infra`
+- `vault-backend-ssh-window.yml`: fixed stale `working-directory: ./infra`
   (the stack lives in `./infra-vault`).
 - Vault workflows now use a dedicated `VAULT_SSH_PUBLIC_KEY` secret (paired
   with `SSH_PRIVATE_KEY` on opale-core) instead of the shared
@@ -52,10 +52,11 @@ are used until the first public version.
 
 ### Changed
 
-- `infra-vault` migrated from Alpine Linux 3 to Ubuntu LTS minimal per the
-  DevOps doctrine (vTPM metadata preserved, config_drive enabled).
-- `infra-deploy.yml`: push now runs `terraform plan` only; apply requires a
-  manual dispatch with `confirm_replace=opale-vault-prod`.
+- `infra-vault` standardized on Ubuntu LTS minimal per the DevOps doctrine
+  (vTPM metadata preserved, config_drive enabled).
+- `vault-infra-deploy.yml`: push now runs Terraform plan/apply for
+  non-destructive Vault VM changes; `prevent_destroy` blocks accidental TPM VM
+  replacement.
 - `infra-pay`: backend VM sizing is aligned with Vault on
   `a1-ram2-disk20-perf1` (1 vCPU / 2 Go RAM / 20 Go disk), and routine applies
   ignore `image_id` drift from the `most_recent` Ubuntu lookup.

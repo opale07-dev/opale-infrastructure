@@ -1,4 +1,4 @@
-name: "Opale Vault Server List"
+name: "Vault / Server List"
 
 on:
   workflow_dispatch:

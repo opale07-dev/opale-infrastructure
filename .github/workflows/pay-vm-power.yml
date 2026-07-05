@@ -1,4 +1,4 @@
-name: "🔧 Opale Pay VPS Control (Start/Stop)"
+name: "Pay / VM Power"
 
 on:
   workflow_dispatch:

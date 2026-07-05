@@ -1,4 +1,4 @@
-name: "IFK - Configure Opale Pay bitcoind"
+name: "IFK / Configure Pay bitcoind"
 
 on:
   workflow_dispatch:

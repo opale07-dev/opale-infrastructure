@@ -1,4 +1,4 @@
-name: "Opale Vault - Backend Bootstrap SSH Window"
+name: "Vault / Backend SSH Window"
 
 on:
   workflow_dispatch:

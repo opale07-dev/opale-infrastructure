@@ -69,13 +69,12 @@ maintenance/                # timers de maintenance (backup, selfcheck, harden)
 scripts/
   apply-ifk-bitcoind.sh
   harden-ubuntu-vps.sh
-  harden-alpine-vps.sh   # legacy, kept until the Alpine Vault VM is retired
   opale-vault-sync.sh
   opale-maintenance-remote.sh   # install/update des timers sur une VM existante
 .github/workflows/
-  infra-deploy.yml           # vault: plan on push, apply via dispatch + confirm
-  infra-deploy-pay.yml
-  infra-deploy-data.yml
+  vault-infra-deploy.yml
+  pay-infra-deploy.yml
+  data-infra-deploy.yml
   ifk-bitcoind-config.yml
   edge-oracle-deploy.yml
   vault-server-list.yml
@@ -84,30 +83,29 @@ scripts/
   pay-server-list.yml
   pay-server-show.yml
   pay-server-delete.yml
-  vps-control.yml
-  vps-control-pay.yml
-  backend-bootstrap-window.yml
+  vault-vm-power.yml
+  pay-vm-power.yml
+  vault-backend-ssh-window.yml
 ```
 
-## Vault VM Migration (Alpine → Ubuntu)
+## Vault VM Provisioning
 
-`infra-vault` provisions Ubuntu LTS with vTPM and cloud-init hardening, per the
-DevOps doctrine. The legacy Alpine VM is replaced through an explicit,
-human-driven sequence — never implicitly on push:
+`infra-vault` provisions Ubuntu 26.04 LTS with vTPM and cloud-init hardening,
+per the DevOps doctrine. Any VM replacement remains explicit and human-driven —
+never implicit on push:
 
 1. Verify Vault backups (the master key is sealed in the old VM's vTPM and
    cannot be migrated; only the backup/restore path survives the VM).
-2. `vault-server-list` / `vault-server-show`: identify the Alpine server ID.
+2. `vault-server-list` / `vault-server-show`: identify the current server ID.
 3. `vault-server-delete` with the ID and the `DELETE-VAULT-VM` confirmation —
    or skip and let Terraform plan a replacement.
-4. Dispatch `infra-deploy.yml` with `confirm_replace=opale-vault-prod`: creates
-   the Ubuntu VM (vTPM, cloud-init hardening) and publishes the new IP to
-   `opale-core` secrets.
-5. Open a bootstrap SSH window via `backend-bootstrap-window.yml` if needed,
-   deploy the backend from `opale-core`, restore from backup, re-init the TPM
-   seal.
-
-Pushes touching `infra-vault/**` only run `terraform plan`.
+4. Push `vault-infra-deploy.yml` / `infra-vault/**` changes to `main`: Terraform
+   plans and applies non-destructive changes automatically, creates the Ubuntu
+   26.04 VM when absent, and publishes the new IP to `opale-core` secrets.
+5. Destructive VM replacement is blocked by Terraform `prevent_destroy`; a Vault
+   TPM VM replacement is a deliberate break-glass operation, not a routine CI
+   path.
+6. Backend application deploys are handled by `opale-core` after image publish.
 
 ## Conventions
 
@@ -121,7 +119,7 @@ Pushes touching `infra-vault/**` only run `terraform plan`.
 
 ### Base Runtime
 
-- Ubuntu 26.04 LTS Resolute Raccoon for all Infomaniak/OpenStack VMs.
+- Ubuntu 26.04 LTS for all Opale service VMs.
 - SSH on a non-default admin port.
 - `PasswordAuthentication no`.
 - Firewall default-drop.
@@ -210,7 +208,7 @@ terraform apply \
 
 ### CI/CD
 
-`infra-deploy.yml` and `infra-deploy-pay.yml` run `init`, `plan`, and `apply`
+`vault-infra-deploy.yml`, `pay-infra-deploy.yml`, and `data-infra-deploy.yml` run `init`, `plan`, and `apply`
 on infrastructure changes because the hardening baseline is embedded into the VM
 `user_data`.
 

@@ -1,4 +1,4 @@
-name: "Oracle Edge - Deploy Shared Proxy"
+name: "Edge / Oracle Deploy"
 
 on:
   push:

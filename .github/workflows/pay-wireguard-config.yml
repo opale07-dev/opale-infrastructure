@@ -1,4 +1,4 @@
-name: "Opale Pay - Configure WireGuard"
+name: "Pay / Configure WireGuard"
 
 on:
   workflow_dispatch:

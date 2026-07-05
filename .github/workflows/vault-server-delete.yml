@@ -1,4 +1,4 @@
-name: "Opale Vault Server Delete"
+name: "Vault / Server Delete"
 
 on:
   workflow_dispatch:

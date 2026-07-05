@@ -1,19 +1,27 @@
-name: "OpenStack Image List"
+name: "Vault / VM Power"
 
 on:
   workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action à exécuter sur la VM'
+        required: true
+        default: 'stop'
+        type: choice
+        options:
+          - start
+          - stop
 
 jobs:
-  image-list:
+  control:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Install OpenStack Client
+      - name: Install OpenStack Client on Runner
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq python3-openstackclient > /dev/null
 
-      - name: List images
+      - name: Control VM Instance
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
           OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
@@ -25,4 +33,10 @@ jobs:
           OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
           OS_IDENTITY_API_VERSION: "3"
         run: |
-          openstack image list --long
+          echo "Sending ${{ github.event.inputs.action }} signal to opale-vault-prod..."
+          openstack server ${{ github.event.inputs.action }} opale-vault-prod
+          
+          echo "Waiting for status verification..."
+          sleep 5
+          STATUS=$(openstack server show opale-vault-prod -c status -f value)
+          echo "Current VM Status: $STATUS"

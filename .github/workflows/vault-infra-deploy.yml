@@ -1,4 +1,4 @@
-name: "Opale Core - Infrastructure GitOps"
+name: "Vault / Infrastructure Deploy"
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     paths:
       - 'infra-vault/**'
       - 'scripts/**'
-      - '.github/workflows/infra-deploy.yml'
+      - '.github/workflows/vault-infra-deploy.yml'
   workflow_dispatch:
 
 env:
