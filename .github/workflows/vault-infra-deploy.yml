@@ -56,9 +56,9 @@ jobs:
         run: |
           set -euo pipefail
           openstack token issue -f value -c id >/dev/null
-          openstack server list --limit 1 >/dev/null
-          openstack image list --limit 1 >/dev/null
-          openstack network list --limit 1 >/dev/null
+          openstack server list -f value -c ID >/dev/null
+          openstack image list -f value -c ID >/dev/null
+          openstack network list -f value -c ID >/dev/null
           echo "OpenStack APIs accessibles pour $OS_REGION_NAME (compute/image/network)."
 
       - name: Setup Terraform
