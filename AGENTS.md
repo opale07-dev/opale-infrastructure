@@ -12,13 +12,16 @@ This repository owns:
 - first-boot hardening via `cloud-init` templates;
 - the shared Oracle public edge (`edge-oracle/`): Caddy + Coraza WAF build,
   reverse proxy routes, WAF policy, shared Docker network `opale-edge`;
-- push-based deployment workflows for infrastructure artifacts.
+- push-based deployment workflows for infrastructure artifacts and selected
+  product container images published to private GHCR by product repositories.
 
 This repository does not own:
 
 - product code, tests, or product container builds (product repos own those);
+- product GHCR image publication (product repos publish immutable image
+  digests; this repo deploys the selected digest);
 - application secrets (never store long-lived secrets here);
-- product frontend deployment logic.
+- product frontend build logic.
 
 ## Non-Negotiable DevOps Doctrine
 
@@ -30,6 +33,8 @@ deployment design change. Key rules:
 - CI/CD pushes deployments explicitly.
 - `cloud-init` is first-boot bootstrap only.
 - Oracle edge configuration lives here, never in product repos.
+- Product repos build and publish private GHCR images only; this repo owns VM
+  configuration and container rollout for Opale-managed environments.
 
 ## Conventions
 

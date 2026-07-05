@@ -11,6 +11,13 @@ are used until the first public version.
 
 ### Added
 
+- `scripts/deploy-ghcr-container.sh`: push-based container rollout helper used
+  by infrastructure workflows to deploy immutable private GHCR image digests to
+  passive Opale VMs without any VM-side Git pull or self-update loop.
+- `vault-infra-deploy.yml`, `pay-infra-deploy.yml`, and
+  `data-infra-deploy.yml`: optional `image_ref` dispatch path. Product repos
+  publish private GHCR images; opale-infrastructure opens temporary runner SSH,
+  deploys the selected digest, healthchecks, and closes the SSH rule.
 - `maintenance/`: host maintenance timers owned by opale-infrastructure per the
   revised DevOps doctrine (maintenance ≠ deployment). systemd template units for
   backup (local-first + SHA-256 verify + rotation + optional off-site rsync),
@@ -52,6 +59,9 @@ are used until the first public version.
 
 ### Changed
 
+- Product repos no longer receive VM deployment targets from infra workflows.
+  They own tests/builds/scans/GHCR publication only; opale-infrastructure owns
+  provisioning, VM configuration, and container rollout.
 - `infra-vault` standardized on Ubuntu LTS minimal per the DevOps doctrine
   (vTPM metadata preserved, config_drive enabled).
 - `vault-infra-deploy.yml`: push now runs Terraform plan/apply for
@@ -74,6 +84,8 @@ are used until the first public version.
 
 ### Security
 
+- Container deployment requires immutable `ghcr.io/...@sha256:...` refs and a
+  read-only GHCR token supplied from infrastructure GitHub secrets.
 - Replacing the Vault VM destroys the TPM-sealed master key: the apply and
   delete paths are gated behind explicit confirmations, and the migration
   runbook (README "Vault VM Migration") requires verified backups first.

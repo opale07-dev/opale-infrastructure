@@ -8,11 +8,17 @@ This repository is the canonical provisioning layer for long-lived Opale VMs. It
 - applying a baseline hardening profile;
 - standardizing naming, ports, and filesystem layout;
 - keeping Terraform state in a remote backend;
+- deploying selected private GHCR image digests to passive Opale VMs;
 - exposing only the minimum admin and app surfaces required by each service.
 
 It is also the canonical home for deployment-owned infrastructure configuration that does not belong in product repositories, including the public Oracle edge configuration.
 
 It is not a secret store and must never contain long-lived application secrets.
+
+Product repositories own application code, tests, Docker builds, scans, and
+private GHCR image publication. They do not own VM creation, host configuration,
+security-group changes, Oracle edge configuration, or production container
+rollout.
 
 ## Current Scope
 
@@ -68,8 +74,8 @@ maintenance/                # timers de maintenance (backup, selfcheck, harden)
   README.md
 scripts/
   apply-ifk-bitcoind.sh
+  deploy-ghcr-container.sh
   harden-ubuntu-vps.sh
-  opale-vault-sync.sh
   opale-maintenance-remote.sh   # install/update des timers sur une VM existante
 .github/workflows/
   vault-infra-deploy.yml
@@ -100,12 +106,13 @@ never implicit on push:
 3. `vault-server-delete` with the ID and the `DELETE-VAULT-VM` confirmation —
    or skip and let Terraform plan a replacement.
 4. Push `vault-infra-deploy.yml` / `infra-vault/**` changes to `main`: Terraform
-   plans and applies non-destructive changes automatically, creates the Ubuntu
-   26.04 VM when absent, and publishes the new IP to `opale-core` secrets.
+   plans and applies non-destructive changes automatically and creates the
+   Ubuntu 26.04 VM when absent.
 5. Destructive VM replacement is blocked by Terraform `prevent_destroy`; a Vault
    TPM VM replacement is a deliberate break-glass operation, not a routine CI
    path.
-6. Backend application deploys are handled by `opale-core` after image publish.
+6. Backend application deploys are handled by this repo when an immutable GHCR
+   `image_ref` digest is provided to `vault-infra-deploy.yml`.
 
 ## Conventions
 
@@ -166,15 +173,26 @@ Required secrets:
 - `OS_REGION_NAME`
 - `INFOMANIAK_S3_ACCESS_KEY`
 - `INFOMANIAK_S3_SECRET_KEY`
-- `SSH_PUBLIC_KEY`
 - `ADMIN_CIDR`
 - `VAULT_ALLOWED_CIDR`
+- `VAULT_SSH_PUBLIC_KEY`
+- `VAULT_SSH_PRIVATE_KEY`
+- `OPALE_GHCR_READ_USER`
+- `OPALE_GHCR_READ_TOKEN`
 
 Additional dedicated secrets for Opale Pay:
 
 - `OPALE_PAY_SSH_PUBLIC_KEY`
+- `OPALE_PAY_SSH_PRIVATE_KEY`
 - `OPALE_PAY_ADMIN_CIDR`
 - `OPALE_PAY_ALLOWED_CIDR`
+
+Additional dedicated secrets for Opale Data:
+
+- `OPALE_DATA_SSH_PUBLIC_KEY`
+- `OPALE_DATA_SSH_PRIVATE_KEY`
+- `OPALE_DATA_ADMIN_CIDR`
+- `OPALE_DATA_ALLOWED_CIDR`
 
 ## Usage
 
@@ -212,6 +230,25 @@ terraform apply \
 on infrastructure changes because the hardening baseline is embedded into the VM
 `user_data`.
 
+The same workflows can deploy an already-published product image when they
+receive an immutable GHCR digest by manual `workflow_dispatch` input
+`image_ref`, or by `repository_dispatch` event from a product repo:
+
+- `vault-image-published`
+- `pay-image-published`
+- `data-image-published`
+
+The expected payload is:
+
+```json
+{"image_ref":"ghcr.io/opale07-dev/<image>@sha256:<digest>"}
+```
+
+Product repositories must publish the image first. This repo then opens a
+temporary SSH rule for the GitHub runner, logs into GHCR with a read-only token,
+renders `/opt/<service>/docker-compose.yml`, pulls the selected digest, starts
+the container, runs the service healthcheck, and closes the temporary SSH rule.
+
 `edge-oracle-deploy.yml` builds and deploys the shared Oracle public proxy as
 an infrastructure-owned artifact.
 
@@ -226,11 +263,9 @@ The intended delivery boundary is:
 1. Terraform provisions the VM, networking, and first-boot hardening baseline.
 2. `cloud-init` performs machine bootstrap only.
 3. The application VM remains a passive deployment target.
-4. Application rollout is triggered explicitly by CI/CD from the product side.
-
-For `opale-pay`, the infrastructure workflow publishes the VM connection target
-to the `OpalePay` repository so the product pipeline can push the selected
-release explicitly.
+4. Product repos build and publish private GHCR image digests.
+5. Application rollout is triggered explicitly by GitHub Actions in
+   `opale-infrastructure` using the selected digest.
 
 ## Security Notes
 
@@ -250,7 +285,8 @@ release explicitly.
 - [ ] The service port model is documented: internal port, public port, admin port.
 - [ ] CI injects `ADMIN_CIDR` and `VAULT_ALLOWED_CIDR`.
 - [ ] The VM bootstrap completes without embedding application deployment logic.
-- [ ] The product pipeline can deploy explicitly to the provisioned target.
+- [ ] The product pipeline publishes a private GHCR image by immutable digest.
+- [ ] The infra pipeline deploys the selected digest and verifies health.
 
 ## Next Improvements
 

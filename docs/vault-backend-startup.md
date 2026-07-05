@@ -13,17 +13,14 @@
 Infomaniak OpenStack — Ubuntu 26.04
 ┌──────────────────────────────────────────┐
 │ /opt/opale-vault/                        │
-│   ├── .env           ← VAULT_UNSEAL_MODE=tpm
-│   ├── deploy.env     ← GITHUB_DEPLOY_USER, GITHUB_DEPLOY_PAT
-│   ├── docker-compose.prod.yml
-│   └── Caddyfile
+│   ├── app.env        ← VAULT_UNSEAL_MODE=tpm
+│   ├── docker-compose.yml
+│   └── data/
 │                                          │
 │ docker compose :                         │
-│   vault (:3000, non exposé)              │
+│   opale-vault (:8443)                    │
 │     └── /dev/tpmrm0:/dev/tpmrm0          │
 │     └── /data → secrets chiffrés         │
-│   proxy (caddy:2-alpine, :8443)          │
-│     └── TLS internal → vault:3000        │
 └──────────────────────────────────────────┘
          ▲
          │ port 8443 (restreint à l'IP Oracle)
@@ -165,46 +162,45 @@ $SSH "sudo node --import tsx src/tpm-provision.ts"
 
 ## Étape 4 — Premier déploiement
 
-### 4a. Préparer `deploy.env` sur la VM
+### 4a. Préparer l'env applicatif local sur la VM
+
+La VM ne stocke pas de token GitHub et ne pull jamais le repo applicatif. Les
+secrets de déploiement GHCR restent dans GitHub Actions côté
+`opale-infrastructure`.
 
 ```bash
-$SSH "cat | sudo tee /opt/opale-vault/deploy.env > /dev/null << 'EOF'
-GITHUB_DEPLOY_USER=opale07-dev
-GITHUB_DEPLOY_PAT=<ton_PAT_read:packages>
+$SSH "cat | sudo tee /opt/opale-vault/app.env > /dev/null << 'EOF'
+VAULT_UNSEAL_MODE=tpm
 VAULT_ADMIN_PUBKEYS=<ta_pubkey_solana_base58>
 VAULT_TPM_NV_INDEX=0x1500016
 EOF
-sudo chmod 600 /opt/opale-vault/deploy.env"
+sudo chmod 600 /opt/opale-vault/app.env"
 ```
 
-### 4b. Lancer le script de sync
+### 4b. Déployer l'image publiée depuis `opale-infrastructure`
 
-```bash
-# Copier le script de sync sur la VM
-scp -P 2222 -i ~/Dev/ProjetsPerso/.key/ssh-key-2026-05-09.key \
-  ~/Dev/ProjetsPerso/OpaleInfrastructure/opale-infrastructure/scripts/opale-vault-sync.sh \
-  ubuntu@${VM_IP}:/opt/opale-vault/
+Le repo applicatif publie seulement l'image privée dans GHCR. Ensuite, lancer
+`Vault / Infrastructure Deploy` dans ce repo avec `image_ref`:
 
-$SSH "sudo chmod +x /opt/opale-vault/opale-vault-sync.sh"
-
-# Exécuter
-$SSH "cd /opt/opale-vault && sudo bash opale-vault-sync.sh"
+```text
+ghcr.io/opale07-dev/<image>@sha256:<digest>
 ```
 
-### Ce que `opale-vault-sync.sh` fait
+ou déclencher `repository_dispatch` avec:
 
-1. Lit `deploy.env`
-2. Fetch `docker-compose.prod.yml` et `Caddyfile` depuis GitHub
-3. Écrit `.env` avec :
-   ```
-   VAULT_UNSEAL_MODE=tpm
-   VAULT_TPM_NV_INDEX=0x1500016
-   VAULT_ADMIN_PUBKEYS=<pubkey>
-   ```
-   → **Aucune passphrase dans .env**
-4. Login GHCR
+```json
+{"event_type":"vault-image-published","client_payload":{"image_ref":"ghcr.io/opale07-dev/<image>@sha256:<digest>"}}
+```
+
+### Ce que le workflow infra fait
+
+1. Vérifie que `image_ref` est un digest immutable `ghcr.io/...@sha256:...`
+2. Ouvre temporairement SSH depuis l'IP du runner GitHub Actions
+3. Login GHCR avec `OPALE_GHCR_READ_USER` / `OPALE_GHCR_READ_TOKEN`
+4. Rend `/opt/opale-vault/docker-compose.yml`
 5. `docker compose pull && up -d`
 6. Attend le healthcheck (`curl -k https://localhost:8443/api/health`)
+7. Ferme la règle SSH temporaire
 
 ---
 
@@ -246,19 +242,19 @@ open https://core.gmlabs.ch
 
 ```bash
 # Mise à jour du backend
-$SSH "cd /opt/opale-vault && sudo bash opale-vault-sync.sh"
+# Lancer le workflow "Vault / Infrastructure Deploy" avec un image_ref GHCR par digest.
 
 # Redémarrage propre
-$SSH "cd /opt/opale-vault && sudo docker compose -f docker-compose.prod.yml down && sudo docker compose -f docker-compose.prod.yml up -d"
+$SSH "cd /opt/opale-vault && sudo docker compose -f docker-compose.yml down && sudo docker compose -f docker-compose.yml up -d"
 
 # Logs
-$SSH "cd /opt/opale-vault && sudo docker compose -f docker-compose.prod.yml logs -f vault"
+$SSH "cd /opt/opale-vault && sudo docker compose -f docker-compose.yml logs -f opale-vault"
 
 # Statut du TPM
 $SSH "sudo tpm2_getcap properties-fixed -T device:/dev/tpmrm0 | grep -i vendor"
 
 # Backup des données (à planifier en cron)
-$SSH "cd /opt/opale-vault && sudo docker compose -f docker-compose.prod.yml exec vault npm run backup"
+$SSH "cd /opt/opale-vault && sudo docker compose -f docker-compose.yml exec opale-vault npm run backup"
 ```
 
 ---
