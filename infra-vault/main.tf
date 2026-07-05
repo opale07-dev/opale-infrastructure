@@ -5,6 +5,10 @@ terraform {
       source  = "terraform-provider-openstack/openstack"
       version = "~> 1.53.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 
   # Configuration du stockage d'état souverain chez Infomaniak
@@ -50,6 +54,13 @@ resource "openstack_images_image_v2" "ubuntu_tpm" {
   }
 }
 
+# Bundle du module de maintenance (scripts + unités systemd) pour cloud-init.
+data "archive_file" "maintenance" {
+  type        = "zip"
+  source_dir  = "${path.module}/../maintenance"
+  output_path = "${path.module}/.maintenance.zip"
+}
+
 # 2. Définition de la clé SSH pour l'accès bare-metal
 resource "openstack_compute_keypair_v2" "opale_key" {
   name       = "${local.service_name}-key"
@@ -69,7 +80,10 @@ resource "openstack_compute_instance_v2" "opale_vault" {
     app_dir             = local.app_dir
     ssh_port            = local.ssh_port
     vault_internal_port = local.vault_internal_port
+    service_name        = local.service_name
+    backup_volume       = "${local.service_name}_vault-data"
     harden_script_b64   = filebase64("${path.module}/../scripts/harden-ubuntu-vps.sh")
+    maintenance_zip_b64 = filebase64(data.archive_file.maintenance.output_path)
   })
 
   lifecycle {

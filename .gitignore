@@ -62,3 +62,7 @@ sbom/
 crash.log
 *.tfvars
 !*.tfvars.example
+
+# Terraform-generated maintenance bundle
+.maintenance.zip
+infra-*/.maintenance.zip

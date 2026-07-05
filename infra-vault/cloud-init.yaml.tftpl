@@ -6,8 +6,21 @@ write_files:
     encoding: b64
     content: |
       ${harden_script_b64}
+  - path: /tmp/opale-maintenance.zip
+    owner: root:root
+    permissions: "0600"
+    encoding: b64
+    content: |
+      ${maintenance_zip_b64}
 runcmd:
   - mkdir -p /usr/local/bin "${app_dir}" "${app_dir}/data"
   - /usr/local/bin/harden-ubuntu-vps.sh --ssh-port ${ssh_port} --app-port ${vault_internal_port} --admin-user ${admin_user} --app-dir ${app_dir}
+  # Installation des timers de maintenance (backup, selfcheck, hardening).
+  # Maintenance uniquement — ne déploie aucune application (doctrine DevOps).
+  - mkdir -p /opt/opale-maintenance-src
+  - python3 -c "import zipfile; zipfile.ZipFile('/tmp/opale-maintenance.zip').extractall('/opt/opale-maintenance-src')"
+  - chmod +x /opt/opale-maintenance-src/*.sh
+  - /opt/opale-maintenance-src/opale-maintenance-install.sh --service ${service_name} --volume ${backup_volume} --health-url https://127.0.0.1:${vault_internal_port}/api/health --health-expect '"status":"ok"' --ssh-port ${ssh_port} --app-port ${vault_internal_port} --admin-user ${admin_user} --app-dir ${app_dir} --cert-path ${app_dir}/tls/backend.crt --src-dir /opt/opale-maintenance-src
+  - rm -f /tmp/opale-maintenance.zip
   - touch "${app_dir}/.bootstrap-complete"
   - chmod 640 "${app_dir}/.bootstrap-complete"

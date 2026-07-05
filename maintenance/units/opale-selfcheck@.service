@@ -1,0 +1,10 @@
+[Unit]
+Description=Opale maintenance self-check for %i (health, cert, key age, backup freshness)
+Documentation=https://github.com/opale07-dev/opale-infrastructure
+After=docker.service
+# Lecture seule : n'altère jamais l'état du service.
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/opale/maintenance/%i.env
+ExecStart=/usr/local/lib/opale-maintenance/opale-selfcheck.sh

@@ -1,0 +1,11 @@
+[Unit]
+Description=Opale maintenance self-check timer for %i
+
+[Timer]
+# Toutes les 6 heures.
+OnCalendar=*-*-* 00/6:10:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

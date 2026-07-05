@@ -1,0 +1,11 @@
+[Unit]
+Description=Opale maintenance hardening re-apply timer for %i
+
+[Timer]
+# Hebdomadaire, dimanche 04:40 UTC.
+OnCalendar=Sun *-*-* 04:40:00 UTC
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Opale maintenance backup for %i (local-first, optional off-site)
+Documentation=https://github.com/opale07-dev/opale-infrastructure
+After=docker.service
+Requires=docker.service
+# Maintenance uniquement : sauvegarde des données, ne tire aucune image,
+# ne change aucune version applicative (doctrine DevOps Opale).
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/opale/maintenance/%i.env
+ExecStart=/usr/local/lib/opale-maintenance/opale-backup.sh
+Nice=10
+IOSchedulingClass=idle

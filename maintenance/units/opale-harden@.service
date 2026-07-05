@@ -1,0 +1,12 @@
+[Unit]
+Description=Opale maintenance hardening re-apply for %i (drift control)
+Documentation=https://github.com/opale07-dev/opale-infrastructure
+# Maintenance uniquement : ré-applique la baseline de durcissement idempotente
+# pour corriger la dérive de configuration hôte. Ne tire aucune image, ne
+# change aucune version applicative (doctrine DevOps Opale).
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/opale/maintenance/%i.env
+# Le script est idempotent ; les paramètres viennent de l'EnvironmentFile.
+ExecStart=/bin/sh -c '/usr/local/bin/harden-ubuntu-vps.sh --ssh-port "$OPALE_SSH_PORT" --app-port "$OPALE_APP_PORT" --admin-user "$OPALE_ADMIN_USER" --app-dir "$OPALE_APP_DIR"'

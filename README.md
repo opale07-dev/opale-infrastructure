@@ -60,11 +60,18 @@ infra-data/
   variables.tf
   outputs.tf
   cloud-init.yaml.tftpl
+maintenance/                # timers de maintenance (backup, selfcheck, harden)
+  opale-maintenance-install.sh
+  opale-backup.sh
+  opale-selfcheck.sh
+  units/                    # unités systemd templatées opale-*@.{service,timer}
+  README.md
 scripts/
   apply-ifk-bitcoind.sh
   harden-ubuntu-vps.sh
   harden-alpine-vps.sh   # legacy, kept until the Alpine Vault VM is retired
   opale-vault-sync.sh
+  opale-maintenance-remote.sh   # install/update des timers sur une VM existante
 .github/workflows/
   infra-deploy.yml           # vault: plan on push, apply via dispatch + confirm
   infra-deploy-pay.yml

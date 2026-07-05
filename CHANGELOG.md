@@ -11,6 +11,16 @@ are used until the first public version.
 
 ### Added
 
+- `maintenance/`: host maintenance timers owned by opale-infrastructure per the
+  revised DevOps doctrine (maintenance ≠ deployment). systemd template units for
+  backup (local-first + SHA-256 verify + rotation + optional off-site rsync),
+  self-check (health, TLS cert expiry, key-age rotation reminder, backup
+  freshness), and weekly idempotent hardening re-apply. Idempotent installer
+  `opale-maintenance-install.sh`. `unattended-upgrades` enabled for OS patches.
+  Wired into `infra-vault` cloud-init (bundled via `archive_file` + python3
+  extract) and installable on an existing VM via
+  `scripts/opale-maintenance-remote.sh`. No maintenance job ever pulls
+  application code/images.
 - `pay-backend-bootstrap-window.yml`: Opale Pay backend deploys can now open
   and close temporary GitHub Actions SSH access to the VM through Terraform on
   the hardened port `2222`.
