@@ -23,7 +23,7 @@ jobs:
           IFK_SSH_PRIVATE_KEY: ${{ secrets.IFK_SSH_PRIVATE_KEY }}
           IFK_WG_PRIVATE_KEY: ${{ secrets.IFK_WG_PRIVATE_KEY }}
           OPALE_PAY_WG_PUBLIC_KEY: ${{ secrets.OPALE_PAY_WG_PUBLIC_KEY }}
-          BITCOIN_RPC_USER: ${{ secrets.BITCOIN_RPC_USER }}
+          BITCOIN_RPC_USER: ${{ vars.BITCOIN_RPC_USER || secrets.BITCOIN_RPC_USER || 'opale_pay_rpc' }}
           BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
         run: |
           set -euo pipefail
@@ -52,7 +52,7 @@ jobs:
           BITCOIN_RPC_BIND: ${{ vars.BITCOIN_RPC_BIND || '10.77.0.1' }}
           BITCOIN_RPC_ALLOW_IP: ${{ vars.BITCOIN_RPC_ALLOW_IP || '10.77.0.2/32' }}
           BITCOIN_RPC_PORT: ${{ vars.BITCOIN_RPC_PORT || '18332' }}
-          BITCOIN_RPC_USER: ${{ secrets.BITCOIN_RPC_USER }}
+          BITCOIN_RPC_USER: ${{ vars.BITCOIN_RPC_USER || secrets.BITCOIN_RPC_USER || 'opale_pay_rpc' }}
           BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
           BITCOIN_PRUNE_MB: ${{ vars.BITCOIN_PRUNE_MB || '550' }}
           BITCOIN_P2P_BIND: ${{ vars.BITCOIN_P2P_BIND || '0.0.0.0' }}
