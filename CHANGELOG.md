@@ -11,6 +11,15 @@ are used until the first public version.
 
 ### Added
 
+- Application rollout split from Terraform per the CD doctrine (three layers):
+  new `Vault / App Deploy` (`vault-app-deploy.yml`) and `Vault / Frontend
+  Deploy` (`vault-frontend-deploy.yml`) push the **versioned** deployment
+  state from `deploy/opale-vault{,-frontend}/` (compose, Caddyfile,
+  predeploy.sh — nothing generated on the fly) and converge with a
+  digest-pinned image. `vault-infra-deploy.yml` is Terraform-only again (no
+  repository_dispatch, no container job). Vault specifics preserved: TPM
+  fail-closed, TLS auto-signé, app.env documenté, volume nommé vault-data.
+
 - `scripts/deploy-ghcr-container.sh`: push-based container rollout helper used
   by infrastructure workflows to deploy immutable private GHCR image digests to
   passive Opale VMs without any VM-side Git pull or self-update loop.

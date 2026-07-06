@@ -1,0 +1,200 @@
+name: "Vault / App Deploy"
+
+# Rollout applicatif du backend Vault (couche 3) — AUCUN Terraform ici.
+# Push déclaratif : les fichiers déployés viennent de deploy/opale-vault/ au
+# SHA du checkout ; seuls .env (digest) et app.env (secrets documentés dans
+# app.env.example) sont écrits au déploiement. Déclenché par
+# « Vault / Backend Image Publish » (opale-core) via workflow_dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: "Immutable GHCR image ref, e.g. ghcr.io/opale07-dev/opale-core@sha256:..."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vault-app-deploy
+  cancel-in-progress: false
+
+env:
+  VAULT_OPENSTACK_REGION: dc4-a
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate image ref
+        id: image
+        env:
+          IMAGE_REF: ${{ inputs.image_ref }}
+        run: |
+          set -euo pipefail
+          case "$IMAGE_REF" in
+            ghcr.io/*@sha256:*) ;;
+            *) echo "image_ref must be an immutable GHCR digest"; exit 1 ;;
+          esac
+          echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight required secrets
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VAULT_SSH_PRIVATE_KEY }}
+          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
+          VAULT_ADMIN_PUBKEYS: ${{ secrets.VAULT_ADMIN_PUBKEYS }}
+        run: |
+          test -n "$SSH_PRIVATE_KEY" || { echo "Missing required secret: VAULT_SSH_PRIVATE_KEY"; exit 1; }
+          test -n "$GHCR_USER" || { echo "Missing required secret: OPALE_GHCR_READ_USER"; exit 1; }
+          test -n "$GHCR_TOKEN" || { echo "Missing required secret: OPALE_GHCR_READ_TOKEN"; exit 1; }
+          test -n "$VAULT_ADMIN_PUBKEYS" || { echo "Missing required secret: VAULT_ADMIN_PUBKEYS"; exit 1; }
+
+      - name: Install OpenStack Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      - name: Resolve target VM
+        id: target
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          set -euo pipefail
+          IP="$(openstack server show opale-vault-prod -f json -c addresses \
+            | jq -r '.addresses | to_entries[0].value[] | select(test("^[0-9]+\\."))' | head -n1)"
+          test -n "$IP" || { echo "IPv4 introuvable pour opale-vault-prod"; exit 1; }
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
+      - name: Install SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VAULT_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/opale_vault
+          chmod 600 ~/.ssh/opale_vault
+
+      - name: Open temporary SSH access from runner
+        id: ssh_rule
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          set -euo pipefail
+          RUNNER_CIDR="$(curl -4 -fsS https://api.ipify.org)/32"
+          RULE_ID=$(openstack security group rule create opale-vault-secgroup \
+            --protocol tcp --dst-port 2222:2222 --remote-ip "$RUNNER_CIDR" \
+            -f value -c id)
+          echo "id=$RULE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Push declared deployment state
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_vault"
+          for attempt in $(seq 1 12); do
+            ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" 'true' && break
+            [ "$attempt" -eq 12 ] && { echo "SSH not reachable"; exit 1; }
+            sleep 5
+          done
+          ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" \
+            'sudo mkdir -p /opt/opale-vault && sudo chown ubuntu:ubuntu /opt/opale-vault && chmod 750 /opt/opale-vault'
+          scp $SSH_OPTS -P 2222 \
+            deploy/opale-vault/docker-compose.yml \
+            deploy/opale-vault/Caddyfile \
+            deploy/opale-vault/predeploy.sh \
+            deploy/opale-vault/app.env.example \
+            "ubuntu@${TARGET_IP}:/opt/opale-vault/"
+
+      - name: Write runtime env files (documented in app.env.example)
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          VAULT_ADMIN_PUBKEYS: ${{ secrets.VAULT_ADMIN_PUBKEYS }}
+          VAULT_TPM_NV_INDEX: ${{ secrets.VAULT_TPM_NV_INDEX || '0x1500016' }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_vault"
+          {
+            printf 'VAULT_IMAGE_REF=%s\n' "$IMAGE_REF"
+          } > /tmp/dotenv
+          {
+            printf 'VAULT_UNSEAL_MODE=tpm\n'
+            printf 'VAULT_TPM_NV_INDEX=%s\n' "$VAULT_TPM_NV_INDEX"
+            printf 'VAULT_ADMIN_PUBKEYS=%s\n' "$VAULT_ADMIN_PUBKEYS"
+          } > /tmp/appenv
+          scp $SSH_OPTS -P 2222 /tmp/dotenv "ubuntu@${TARGET_IP}:/opt/opale-vault/.env"
+          scp $SSH_OPTS -P 2222 /tmp/appenv "ubuntu@${TARGET_IP}:/opt/opale-vault/app.env"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" 'chmod 600 /opt/opale-vault/.env /opt/opale-vault/app.env'
+          rm -f /tmp/dotenv /tmp/appenv
+
+      - name: Converge containers
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_vault"
+          printf '%s' "$GHCR_TOKEN" | ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" \
+            "sudo docker login ghcr.io -u '$GHCR_USER' --password-stdin >/dev/null"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" '
+            set -eu
+            cd /opt/opale-vault
+            chmod +x predeploy.sh
+            ./predeploy.sh /opt/opale-vault
+            sudo docker compose pull -q
+            sudo docker compose up -d --remove-orphans --force-recreate
+            attempt=0
+            until curl -fsSk https://127.0.0.1:8443/api/health | grep -q "\"status\":\"ok\""; do
+              attempt=$((attempt + 1))
+              if [ "$attempt" -ge 24 ]; then
+                sudo docker compose ps || true
+                sudo docker compose logs --tail=100 || true
+                echo "Backend healthcheck failed" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "Backend healthy."
+          '
+
+      - name: Close temporary SSH access from runner
+        if: always() && steps.ssh_rule.outputs.id != ''
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
+          OS_IDENTITY_API_VERSION: "3"
+          RULE_ID: ${{ steps.ssh_rule.outputs.id }}
+        run: |
+          set -euo pipefail
+          openstack security group rule delete "$RULE_ID" || true

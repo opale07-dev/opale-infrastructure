@@ -1,0 +1,13 @@
+# Backend Vault Opale — API uniquement, port 8443, HTTPS obligatoire.
+# Ne sert PAS de fichiers statiques. Le dashboard est sur une machine séparée.
+#
+# TLS : certificat auto-signé généré par predeploy.sh
+# (SANs : 127.0.0.1, IP publique de la VM, opale-vault-backend), monté dans
+# /etc/caddy/tls. Un seul certificat sur le serveur → servi à tous les
+# clients, avec ou sans SNI. Vérification côté client en skip-verify
+# (réseau restreint par security group au seul frontend Oracle).
+
+:8443 {
+	tls /etc/caddy/tls/backend.crt /etc/caddy/tls/backend.key
+	reverse_proxy vault:3000
+}

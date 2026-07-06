@@ -1,0 +1,60 @@
+# État déployé CANONIQUE du backend Vault (couche 3 — rollout applicatif).
+# Possédé par opale-infrastructure ; poussé tel quel sur la VM par
+# vault-app-deploy.yml. Aucun fichier n'est généré à la volée (doctrine
+# « no hidden scripts ») — seuls deux env files sont écrits au déploiement,
+# documentés ci-dessous :
+#   .env      : VAULT_IMAGE_REF=<digest GHCR immuable>  (interpolation compose)
+#   app.env   : variables runtime issues des secrets (voir app.env.example)
+#
+# TPM OBLIGATOIRE : le device est mappé inconditionnellement ; predeploy.sh
+# échoue fail-closed si /dev/tpmrm0 est absent de l'hôte.
+
+services:
+  vault:
+    image: ${VAULT_IMAGE_REF:?VAULT_IMAGE_REF (digest GHCR) requis dans .env}
+    restart: unless-stopped
+    env_file:
+      - app.env                    # VAULT_UNSEAL_MODE, VAULT_ADMIN_PUBKEYS, ...
+    environment:
+      NODE_ENV: production
+      VAULT_BIND_HOST: 0.0.0.0     # interne au conteneur ; le port n'est PAS publié
+      VAULT_DATA_DIR: /data
+      VAULT_POLICY_PATH: /data/vault-policy.json
+      VAULT_AUDIT_PATH: /data/vault-audit.jsonl
+      VAULT_ADMIN_PATH: /data/vault-admin.json
+    volumes:
+      - vault-data:/data           # fichiers tenant chiffrés + audit, persistés
+    devices:
+      - /dev/tpmrm0:/dev/tpmrm0    # unseal TPM (obligatoire, vérifié par predeploy)
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    # pas de `ports:` → jamais exposé à l'hôte
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      vault:
+        condition: service_healthy
+    ports:
+      - "8443:8443"                # API uniquement, port non-standard
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./tls:/etc/caddy/tls:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - internal
+      - edge
+
+networks:
+  internal:
+    internal: true
+  edge: {}
+
+volumes:
+  vault-data: {}
+  caddy-data: {}
+  caddy-config: {}

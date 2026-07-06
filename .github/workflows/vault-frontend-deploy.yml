@@ -1,0 +1,146 @@
+name: "Vault / Frontend Deploy"
+
+# Rollout du frontend Vault sur le VPS Oracle (couche 3) — AUCUN Terraform.
+# Push déclaratif depuis deploy/opale-vault-frontend/ ; le conteneur rejoint
+# le réseau opale-edge et est routé par le edge partagé (Caddy + WAF).
+# Déclenché par « Vault / Frontend Image Publish » (opale-core).
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: "Immutable GHCR image ref, e.g. ghcr.io/opale07-dev/opale-vault-frontend@sha256:..."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vault-frontend-deploy
+  cancel-in-progress: false
+
+env:
+  VAULT_OPENSTACK_REGION: dc4-a
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate image ref
+        id: image
+        env:
+          IMAGE_REF: ${{ inputs.image_ref }}
+        run: |
+          set -euo pipefail
+          case "$IMAGE_REF" in
+            ghcr.io/*@sha256:*) ;;
+            *) echo "image_ref must be an immutable GHCR digest"; exit 1 ;;
+          esac
+          echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight required secrets
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
+        run: |
+          test -n "$ORACLE_VPS_IP" || { echo "Missing required secret: ORACLE_VPS_IP"; exit 1; }
+          test -n "$ORACLE_SSH_KEY" || { echo "Missing required secret: ORACLE_SSH_KEY"; exit 1; }
+          test -n "$GHCR_USER" || { echo "Missing required secret: OPALE_GHCR_READ_USER"; exit 1; }
+          test -n "$GHCR_TOKEN" || { echo "Missing required secret: OPALE_GHCR_READ_TOKEN"; exit 1; }
+
+      - name: Install OpenStack Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      - name: Resolve backend URL
+        id: backend
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ env.VAULT_OPENSTACK_REGION }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          set -euo pipefail
+          IP="$(openstack server show opale-vault-prod -f json -c addresses \
+            | jq -r '.addresses | to_entries[0].value[] | select(test("^[0-9]+\\."))' | head -n1)"
+          test -n "$IP" || { echo "IPv4 introuvable pour opale-vault-prod"; exit 1; }
+          echo "url=https://${IP}:8443" >> "$GITHUB_OUTPUT"
+
+      - name: Install SSH key
+        env:
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/oracle_edge
+          chmod 600 ~/.ssh/oracle_edge
+
+      - name: Push declared deployment state
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" \
+            'sudo mkdir -p /opt/opale-vault-frontend && sudo chown ubuntu:ubuntu /opt/opale-vault-frontend'
+          scp $SSH_OPTS -P 2222 \
+            deploy/opale-vault-frontend/docker-compose.yml \
+            "ubuntu@${ORACLE_VPS_IP}:/opt/opale-vault-frontend/"
+
+      - name: Write runtime env (image digest + backend URL)
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          BACKEND_URL: ${{ steps.backend.outputs.url }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
+          {
+            printf 'VAULT_FRONTEND_IMAGE_REF=%s\n' "$IMAGE_REF"
+            printf 'VAULT_BACKEND_URL=%s\n' "$BACKEND_URL"
+            printf 'VAULT_FRONTEND_HOST_PORT=8444\n'
+          } > /tmp/dotenv
+          scp $SSH_OPTS -P 2222 /tmp/dotenv "ubuntu@${ORACLE_VPS_IP}:/opt/opale-vault-frontend/.env"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" 'chmod 600 /opt/opale-vault-frontend/.env'
+          rm -f /tmp/dotenv
+
+      - name: Converge container and verify through edge
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
+          printf '%s' "$GHCR_TOKEN" | ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" \
+            "sudo docker login ghcr.io -u '$GHCR_USER' --password-stdin >/dev/null"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" '
+            set -eu
+            cd /opt/opale-vault-frontend
+            if ! sudo docker network inspect opale-edge >/dev/null 2>&1; then
+              echo "ERREUR: reseau opale-edge absent. Deployer edge-oracle d abord." >&2
+              exit 1
+            fi
+            sudo docker compose pull -q
+            sudo docker compose up -d --remove-orphans --force-recreate
+            sleep 5
+            curl -fsS http://127.0.0.1:8444/ >/dev/null
+            if sudo docker ps --format "{{.Names}}" | grep -qx opale-oracle-edge-proxy; then
+              curl -fsSk --resolve core.gmlabs.ch:443:127.0.0.1 https://core.gmlabs.ch/ >/dev/null
+              curl -fsSk --resolve core.gmlabs.ch:443:127.0.0.1 https://core.gmlabs.ch/vault/ >/dev/null
+            fi
+            echo "Frontend healthy."
+          '

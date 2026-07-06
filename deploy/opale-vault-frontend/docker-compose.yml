@@ -1,0 +1,23 @@
+# État déployé CANONIQUE du frontend Vault sur le VPS Oracle (couche 3).
+# Poussé tel quel par vault-frontend-deploy.yml. Le conteneur est publié en
+# localhost uniquement et routé par le edge partagé (opale-edge / Caddy+WAF).
+#   .env (écrit au déploiement, documenté) :
+#     VAULT_FRONTEND_IMAGE_REF=<digest GHCR immuable>
+#     VAULT_BACKEND_URL=https://<ip-backend>:8443
+
+services:
+  frontend:
+    image: ${VAULT_FRONTEND_IMAGE_REF:?VAULT_FRONTEND_IMAGE_REF (digest GHCR) requis dans .env}
+    container_name: opale-vault-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${VAULT_FRONTEND_HOST_PORT:-8444}:80"
+    environment:
+      VAULT_BACKEND_URL: "${VAULT_BACKEND_URL:?VAULT_BACKEND_URL requis dans .env}"
+    networks:
+      - edge
+
+networks:
+  edge:
+    external: true
+    name: opale-edge
