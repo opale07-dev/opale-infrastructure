@@ -95,7 +95,7 @@ jobs:
           set -euo pipefail
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
           ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" \
-            'sudo mkdir -p /opt/opale-vault-frontend && sudo chown ubuntu:ubuntu /opt/opale-vault-frontend'
+            'sudo mkdir -p /opt/opale-vault-frontend && sudo chown -R ubuntu:ubuntu /opt/opale-vault-frontend'
           scp $SSH_OPTS -P 2222 \
             deploy/opale-vault-frontend/docker-compose.yml \
             "ubuntu@${ORACLE_VPS_IP}:/opt/opale-vault-frontend/"

@@ -121,7 +121,7 @@ jobs:
             sleep 5
           done
           ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" \
-            'sudo mkdir -p /opt/opale-vault && sudo chown ubuntu:ubuntu /opt/opale-vault && chmod 750 /opt/opale-vault'
+            'sudo mkdir -p /opt/opale-vault && sudo chown -R ubuntu:ubuntu /opt/opale-vault && chmod 750 /opt/opale-vault'
           scp $SSH_OPTS -P 2222 \
             deploy/opale-vault/docker-compose.yml \
             deploy/opale-vault/Caddyfile \
