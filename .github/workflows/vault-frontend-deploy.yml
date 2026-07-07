@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       image_ref:
-        description: "Immutable GHCR image ref, e.g. ghcr.io/opale07-dev/opale-vault-frontend@sha256:..."
+        description: "GHCR image ref, e.g. ghcr.io/opale07-dev/opale-vault-frontend:sha-... (tag accepted during test phase — see CHANGELOG)"
         required: true
         type: string
 
@@ -37,9 +37,12 @@ jobs:
           IMAGE_REF: ${{ inputs.image_ref }}
         run: |
           set -euo pipefail
+          # Phase de test (2026-07-07) : accepte digest OU tag — voir
+          # vault-app-deploy.yml et CHANGELOG pour le contexte GHCR/digest.
           case "$IMAGE_REF" in
             ghcr.io/*@sha256:*) ;;
-            *) echo "image_ref must be an immutable GHCR digest"; exit 1 ;;
+            ghcr.io/*:*) ;;
+            *) echo "image_ref must be ghcr.io/<name>@sha256:<digest> or ghcr.io/<name>:<tag>"; exit 1 ;;
           esac
           echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
 

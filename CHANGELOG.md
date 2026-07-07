@@ -9,6 +9,20 @@ are used until the first public version.
 
 ## [Unreleased]
 
+### Changed
+
+- **Phase de test — rollout accepte les tags GHCR, pas seulement les digests.**
+  Le pull par digest immuable (`@sha256:...`) échoue systématiquement en 403
+  sur GHCR (`HEAD .../blobs/sha256:...`) — reproduit identiquement en CI et en
+  local (Docker Desktop), avec 3 configurations de PAT différentes
+  (fine-grained, classic read:packages+repo) et 2 digests distincts. Cause
+  racine non identifiée (probable bug de résolution digest/index OCI côté
+  GHCR ou containerd). `vault-app-deploy.yml` et `vault-frontend-deploy.yml`
+  acceptent temporairement `ghcr.io/<name>:<tag>` en plus du digest. À
+  revisiter : revenir au digest épinglé une fois la cause racine trouvée
+  (moins critique en solo/phase de test, cf. discussion avec Greg
+  2026-07-07).
+
 ### Added
 
 - Application rollout split from Terraform per the CD doctrine (three layers):

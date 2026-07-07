@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       image_ref:
-        description: "Immutable GHCR image ref, e.g. ghcr.io/opale07-dev/opale-core@sha256:..."
+        description: "GHCR image ref, e.g. ghcr.io/opale07-dev/opale-core:sha-... (tag accepted during test phase — see CHANGELOG)"
         required: true
         type: string
 
@@ -38,9 +38,14 @@ jobs:
           IMAGE_REF: ${{ inputs.image_ref }}
         run: |
           set -euo pipefail
+          # Phase de test (2026-07-07) : accepte digest OU tag (le pull GHCR
+          # par digest échoue en 403 quel que soit le PAT — reproduit hors CI
+          # aussi, cf. CHANGELOG). Revenir au digest seul une fois la cause
+          # racine GHCR identifiée/corrigée.
           case "$IMAGE_REF" in
             ghcr.io/*@sha256:*) ;;
-            *) echo "image_ref must be an immutable GHCR digest"; exit 1 ;;
+            ghcr.io/*:*) ;;
+            *) echo "image_ref must be ghcr.io/<name>@sha256:<digest> or ghcr.io/<name>:<tag>"; exit 1 ;;
           esac
           echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
 
