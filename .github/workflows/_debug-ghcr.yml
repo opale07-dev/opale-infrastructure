@@ -1,0 +1,49 @@
+name: "_Debug GHCR Access"
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "sha256 digest to test (without prefix)"
+        required: true
+        type: string
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe GHCR auth and manifest access
+        env:
+          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -uo pipefail
+          echo "=== 1. Token exchange (metadata only, token value never printed) ==="
+          RESP=$(curl -sS -u "$GHCR_USER:$GHCR_TOKEN" "https://ghcr.io/token?scope=repository:opale07-dev/opale-core:pull&service=ghcr.io")
+          TOKEN=$(echo "$RESP" | jq -r .token 2>/dev/null)
+          echo "response has 'token' field: $([ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] && echo yes || echo no)"
+          echo "token length: ${#TOKEN}"
+          echo "response keys: $(echo "$RESP" | jq -r 'keys | join(",")' 2>/dev/null)"
+
+          echo "=== 2. Manifest HEAD (status + headers only) ==="
+          curl -sS -o /dev/null -D - \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+            "https://ghcr.io/v2/opale07-dev/opale-core/manifests/sha256:${DIGEST}" | head -20
+
+          echo "=== 3. Manifest GET (status + error body if any; manifest JSON has no secrets) ==="
+          curl -sS -w "\nHTTP_STATUS:%{http_code}\n" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+            "https://ghcr.io/v2/opale07-dev/opale-core/manifests/sha256:${DIGEST}"
+
+          echo
+          echo "=== 4. Blob HEAD (the failing call — status + headers only) ==="
+          curl -sS -o /dev/null -D - \
+            -H "Authorization: Bearer $TOKEN" \
+            "https://ghcr.io/v2/opale07-dev/opale-core/blobs/sha256:${DIGEST}" | head -20
+
+          echo "=== 5. Tag list (status + body; contains only tag names) ==="
+          curl -sS -w "\nHTTP_STATUS:%{http_code}\n" -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/opale07-dev/opale-core/tags/list"
+          echo
