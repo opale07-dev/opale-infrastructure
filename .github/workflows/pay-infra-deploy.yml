@@ -151,7 +151,7 @@ jobs:
       - name: Preflight deploy secrets
         env:
           SSH_PRIVATE_KEY: ${{ secrets.OPALE_PAY_SSH_PRIVATE_KEY }}
-          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
           GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           test -n "$SSH_PRIVATE_KEY" || { echo "Missing required secret: OPALE_PAY_SSH_PRIVATE_KEY"; exit 1; }
@@ -203,7 +203,7 @@ jobs:
 
       - name: Deploy Pay container
         env:
-          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
           GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           set -euo pipefail

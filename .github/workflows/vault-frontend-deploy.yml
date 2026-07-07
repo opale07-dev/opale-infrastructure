@@ -50,7 +50,7 @@ jobs:
         env:
           ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
-          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
           GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           test -n "$ORACLE_VPS_IP" || { echo "Missing required secret: ORACLE_VPS_IP"; exit 1; }
@@ -123,7 +123,7 @@ jobs:
       - name: Converge container and verify through edge
         env:
           ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
-          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
           GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           set -euo pipefail

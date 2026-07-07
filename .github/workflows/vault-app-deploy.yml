@@ -52,7 +52,7 @@ jobs:
       - name: Preflight required secrets
         env:
           SSH_PRIVATE_KEY: ${{ secrets.VAULT_SSH_PRIVATE_KEY }}
-          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
           GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
           VAULT_ADMIN_PUBKEYS: ${{ secrets.VAULT_ADMIN_PUBKEYS }}
         run: |
@@ -159,7 +159,7 @@ jobs:
       - name: Converge containers
         env:
           TARGET_IP: ${{ steps.target.outputs.ip }}
-          GHCR_USER: ${{ secrets.OPALE_GHCR_READ_USER }}
+          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
           GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           set -euo pipefail
