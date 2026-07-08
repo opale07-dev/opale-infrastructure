@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: vault-frontend-deploy
@@ -50,13 +51,30 @@ jobs:
         env:
           ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
-          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
-          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           test -n "$ORACLE_VPS_IP" || { echo "Missing required secret: ORACLE_VPS_IP"; exit 1; }
           test -n "$ORACLE_SSH_KEY" || { echo "Missing required secret: ORACLE_SSH_KEY"; exit 1; }
-          test -n "$GHCR_USER" || { echo "Missing required secret: OPALE_GHCR_READ_USER"; exit 1; }
-          test -n "$GHCR_TOKEN" || { echo "Missing required secret: OPALE_GHCR_READ_TOKEN"; exit 1; }
+
+      - name: Login to GHCR (runner only — GITHUB_TOKEN)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image on runner and bundle it
+        id: bundle
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE_REF"
+          NAME="${IMAGE_REF%%@*}"; NAME="${NAME%:*}"
+          LOCAL_REF="${NAME}:rollout-${GITHUB_RUN_ID}"
+          docker tag "$IMAGE_REF" "$LOCAL_REF"
+          docker save "$LOCAL_REF" | gzip > /tmp/vault-frontend-image.tar.gz
+          ls -lh /tmp/vault-frontend-image.tar.gz
+          echo "local_ref=$LOCAL_REF" >> "$GITHUB_OUTPUT"
 
       - name: Install OpenStack Client
         run: |
@@ -102,11 +120,13 @@ jobs:
           scp $SSH_OPTS -P 2222 \
             deploy/opale-vault-frontend/docker-compose.yml \
             "ubuntu@${ORACLE_VPS_IP}:/opt/opale-vault-frontend/"
+          scp $SSH_OPTS -P 2222 /tmp/vault-frontend-image.tar.gz \
+            "ubuntu@${ORACLE_VPS_IP}:/tmp/vault-frontend-image.tar.gz"
 
       - name: Write runtime env (image digest + backend URL)
         env:
           ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
-          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          IMAGE_REF: ${{ steps.bundle.outputs.local_ref }}
           BACKEND_URL: ${{ steps.backend.outputs.url }}
         run: |
           set -euo pipefail
@@ -123,13 +143,9 @@ jobs:
       - name: Converge container and verify through edge
         env:
           ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
-          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
-          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           set -euo pipefail
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
-          printf '%s' "$GHCR_TOKEN" | ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" \
-            "sudo docker login ghcr.io -u '$GHCR_USER' --password-stdin >/dev/null"
           ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" '
             set -eu
             cd /opt/opale-vault-frontend
@@ -137,7 +153,8 @@ jobs:
               echo "ERREUR: reseau opale-edge absent. Deployer edge-oracle d abord." >&2
               exit 1
             fi
-            sudo docker compose pull -q
+            sudo docker load -i /tmp/vault-frontend-image.tar.gz
+            rm -f /tmp/vault-frontend-image.tar.gz
             sudo docker compose up -d --remove-orphans --force-recreate
             sleep 5
             curl -fsS http://127.0.0.1:8444/ >/dev/null

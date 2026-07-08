@@ -2,9 +2,19 @@ name: "Vault / App Deploy"
 
 # Rollout applicatif du backend Vault (couche 3) — AUCUN Terraform ici.
 # Push déclaratif : les fichiers déployés viennent de deploy/opale-vault/ au
-# SHA du checkout ; seuls .env (digest) et app.env (secrets documentés dans
+# SHA du checkout ; seuls .env (image) et app.env (secrets documentés dans
 # app.env.example) sont écrits au déploiement. Déclenché par
 # « Vault / Backend Image Publish » (opale-core) via workflow_dispatch.
+#
+# Transport d'image : le RUNNER tire l'image GHCR avec le GITHUB_TOKEN
+# (chemin gratuit et autorisé — même pattern qu'edge-oracle-deploy), puis
+# docker save → scp → docker load sur la VM. Les pulls GHCR par PAT depuis
+# les VM échouent en 403 (reproductible partout, probable métering des
+# packages privés hors Actions) : la VM ne parle plus jamais à GHCR et ne
+# détient AUCUN credential de registre.
+# Prérequis one-time : le package GHCR doit accorder l'accès Actions en
+# lecture à ce repo (package settings → Manage Actions access →
+# opale-infrastructure : Read).
 
 on:
   workflow_dispatch:
@@ -16,6 +26,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: vault-app-deploy
@@ -52,14 +63,33 @@ jobs:
       - name: Preflight required secrets
         env:
           SSH_PRIVATE_KEY: ${{ secrets.VAULT_SSH_PRIVATE_KEY }}
-          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
-          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
           VAULT_ADMIN_PUBKEYS: ${{ secrets.VAULT_ADMIN_PUBKEYS }}
         run: |
           test -n "$SSH_PRIVATE_KEY" || { echo "Missing required secret: VAULT_SSH_PRIVATE_KEY"; exit 1; }
-          test -n "$GHCR_USER" || { echo "Missing required secret: OPALE_GHCR_READ_USER"; exit 1; }
-          test -n "$GHCR_TOKEN" || { echo "Missing required secret: OPALE_GHCR_READ_TOKEN"; exit 1; }
           test -n "$VAULT_ADMIN_PUBKEYS" || { echo "Missing required secret: VAULT_ADMIN_PUBKEYS"; exit 1; }
+
+      - name: Login to GHCR (runner only — GITHUB_TOKEN)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image on runner and bundle it
+        id: bundle
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE_REF"
+          # Référence locale stable pour la VM : le tag survit au docker load
+          # (contrairement à un digest de registre) et reste traçable au run.
+          NAME="${IMAGE_REF%%@*}"; NAME="${NAME%:*}"
+          LOCAL_REF="${NAME}:rollout-${GITHUB_RUN_ID}"
+          docker tag "$IMAGE_REF" "$LOCAL_REF"
+          docker save "$LOCAL_REF" | gzip > /tmp/vault-image.tar.gz
+          ls -lh /tmp/vault-image.tar.gz
+          echo "local_ref=$LOCAL_REF" >> "$GITHUB_OUTPUT"
 
       - name: Install OpenStack Client
         run: |
@@ -133,11 +163,13 @@ jobs:
             deploy/opale-vault/predeploy.sh \
             deploy/opale-vault/app.env.example \
             "ubuntu@${TARGET_IP}:/opt/opale-vault/"
+          scp $SSH_OPTS -P 2222 /tmp/vault-image.tar.gz \
+            "ubuntu@${TARGET_IP}:/tmp/vault-image.tar.gz"
 
       - name: Write runtime env files (documented in app.env.example)
         env:
           TARGET_IP: ${{ steps.target.outputs.ip }}
-          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          IMAGE_REF: ${{ steps.bundle.outputs.local_ref }}
           VAULT_ADMIN_PUBKEYS: ${{ secrets.VAULT_ADMIN_PUBKEYS }}
           VAULT_TPM_NV_INDEX: ${{ secrets.VAULT_TPM_NV_INDEX || '0x1500016' }}
         run: |
@@ -159,19 +191,16 @@ jobs:
       - name: Converge containers
         env:
           TARGET_IP: ${{ steps.target.outputs.ip }}
-          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
-          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
         run: |
           set -euo pipefail
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_vault"
-          printf '%s' "$GHCR_TOKEN" | ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" \
-            "sudo docker login ghcr.io -u '$GHCR_USER' --password-stdin >/dev/null"
           ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" '
             set -eu
             cd /opt/opale-vault
             chmod +x predeploy.sh
             ./predeploy.sh /opt/opale-vault
-            sudo docker compose pull -q
+            sudo docker load -i /tmp/vault-image.tar.gz
+            rm -f /tmp/vault-image.tar.gz
             sudo docker compose up -d --remove-orphans --force-recreate
             attempt=0
             until curl -fsSk https://127.0.0.1:8443/api/health | grep -q "\"status\":\"ok\""; do

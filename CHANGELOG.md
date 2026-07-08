@@ -11,6 +11,21 @@ are used until the first public version.
 
 ### Changed
 
+- **Transport d'image par bundle (save/load), plus aucun credential GHCR sur
+  les VM.** Les pulls GHCR authentifiés par PAT échouent en 403 depuis
+  l'extérieur d'Actions (reproduit CI + poste local, tous types de PAT,
+  digest comme tag) alors que le chemin GITHUB_TOKEN dans Actions fonctionne
+  — asymétrie compatible avec le métering des packages privés hors Actions.
+  `vault-app-deploy.yml` et `vault-frontend-deploy.yml` tirent désormais
+  l'image sur le runner avec le GITHUB_TOKEN (même pattern éprouvé
+  qu'`edge-oracle-deploy`), la re-taguent `rollout-<run_id>`, puis
+  docker save → scp → docker load sur la cible. Prérequis one-time : accès
+  Actions « Read » accordé à opale-infrastructure sur les packages
+  `opale-core` et `opale-vault-frontend`. Secrets `OPALE_GHCR_READ_*`
+  devenus inutiles.
+
+### Changed
+
 - **Phase de test — rollout accepte les tags GHCR, pas seulement les digests.**
   Le pull par digest immuable (`@sha256:...`) échoue systématiquement en 403
   sur GHCR (`HEAD .../blobs/sha256:...`) — reproduit identiquement en CI et en
