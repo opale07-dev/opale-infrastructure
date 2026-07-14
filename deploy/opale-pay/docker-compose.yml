@@ -1,0 +1,113 @@
+# Canonical production state for the Opale Pay backend.
+# The workflow writes only .env (image reference) and app.env (runtime secrets).
+
+services:
+  cln:
+    image: elementsproject/lightningd@sha256:abc26f1ece2ea2986f4cb5dc0117c81aed2c1662f6fb266838c4208c2f99468d
+    container_name: opalepay-cln
+    restart: unless-stopped
+    env_file:
+      - app.env
+    command:
+      - --network=testnet
+      - --bitcoin-rpcuser=${BITCOIN_RPC_USER:?BITCOIN_RPC_USER is required}
+      - --bitcoin-rpcpassword=${BITCOIN_RPC_PASSWORD:?BITCOIN_RPC_PASSWORD is required}
+      - --bitcoin-rpcconnect=${BITCOIN_RPC_HOST:?BITCOIN_RPC_HOST is required}
+      - --bitcoin-rpcport=${BITCOIN_RPC_PORT:-18332}
+      - --clnrest-port=3010
+      - --clnrest-host=0.0.0.0
+      - --log-level=info
+    expose:
+      - "3010"
+    volumes:
+      - cln_data:/root/.lightning
+    networks:
+      - pay
+    mem_limit: 512m
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    container_name: opalepay-postgres
+    restart: unless-stopped
+    env_file:
+      - app.env
+    environment:
+      POSTGRES_USER: lnbits
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: lnbits
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    networks:
+      - pay
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lnbits -d lnbits"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 384m
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+
+  lnbits:
+    image: lnbits/lnbits@sha256:9f8682f435d0f67b2095df64eb4a604462eb51c1669a0387ba49e6b16d5ff9d0
+    container_name: opalepay-lnbits
+    restart: unless-stopped
+    env_file:
+      - app.env
+    environment:
+      LNBITS_ADMIN_UI: "true"
+      LNBITS_BACKEND_WALLET_CLASS: CoreLightningRestWallet
+      CORELIGHTNING_REST_URL: https://cln:3010
+      CORELIGHTNING_REST_CERT: /cln/testnet/ca.pem
+      CORELIGHTNING_REST_MACAROON: ${CLN_REST_MACAROON:-}
+      LNBITS_DATABASE_URL: postgres://lnbits:${POSTGRES_PASSWORD}@postgres:5432/lnbits
+      LNBITS_SITE_TITLE: Opale Pay
+    volumes:
+      - lnbits_data:/data
+      - cln_data:/cln:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cln:
+        condition: service_started
+    networks:
+      - pay
+    mem_limit: 384m
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+
+  proxy:
+    image: ${PAY_PROXY_IMAGE_REF:?PAY_PROXY_IMAGE_REF is required in .env}
+    container_name: opalepay-proxy
+    restart: unless-stopped
+    env_file:
+      - app.env
+    environment:
+      L402_PROXY_HOST: 0.0.0.0
+      L402_PROXY_PORT: "8080"
+      LNBITS_BASE_URL: http://lnbits:5000
+      GEOBLOCK_ENABLED: ${GEOBLOCK_ENABLED:-false}
+    ports:
+      - "0.0.0.0:8080:8080"
+    depends_on:
+      lnbits:
+        condition: service_started
+    networks:
+      - pay
+    mem_limit: 256m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  pay:
+
+volumes:
+  cln_data:
+  lnbits_data:
+  postgres_data:

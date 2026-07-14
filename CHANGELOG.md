@@ -11,6 +11,22 @@ are used until the first public version.
 
 ### Changed
 
+- Opale Pay suit maintenant le modele CD declaratif a trois couches. Le
+  workflow Terraform `pay-infra-deploy.yml` ne deploie plus de conteneur;
+  `pay-app-deploy.yml` recoit les digests proxy/frontend, deploie d'abord la
+  stack backend complete depuis `deploy/opale-pay/`, puis le frontend Oracle
+  depuis `deploy/opale-pay-frontend/`, avec verifications RPC, LNbits, API et
+  route publique `/pay`.
+- Les images tierces Pay et bitcoind sont epinglees par digest. Le runner
+  GitHub transfere les images produit par bundle, sans credential GHCR sur les
+  VM.
+- `bitcoind` est plafonne a 1.5 GiB avec `dbcache=256`, mempool de 100 MiB et
+  P2P lie a loopback par defaut. L'ouverture publique de `18333/tcp` devient
+  une decision explicite.
+- L'edge Oracle deploie l'image liee au SHA du commit au lieu de `latest`,
+  refuse de supprimer un occupant de port inconnu et verifie les routes
+  publiques disponibles apres redemarrage.
+
 - **Transport d'image par bundle (save/load), plus aucun credential GHCR sur
   les VM.** Les pulls GHCR authentifiés par PAT échouent en 403 depuis
   l'extérieur d'Actions (reproduit CI + poste local, tous types de PAT,

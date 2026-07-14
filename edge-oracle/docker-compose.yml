@@ -1,6 +1,6 @@
 services:
   proxy:
-    image: ghcr.io/opale07-dev/opale-oracle-edge:latest
+    image: ${OPALE_EDGE_IMAGE_REF:?OPALE_EDGE_IMAGE_REF is required in .env}
     container_name: opale-oracle-edge-proxy
     restart: unless-stopped
     ports:

@@ -37,10 +37,19 @@ BITCOIN_RPC_PORT=18332
 BITCOIN_RPC_USER=opale_pay_rpc
 BITCOIN_RPC_PASSWORD=<strong-secret>
 BITCOIN_PRUNE_MB=550
+BITCOIN_DB_CACHE_MB=256
+BITCOIN_MAX_MEMPOOL_MB=100
+BITCOIN_MEMORY_LIMIT=1536m
+BITCOIN_P2P_BIND=127.0.0.1
 ```
 
 `BITCOIN_RPC_USER` and `BITCOIN_RPC_PASSWORD` must match the GitHub secrets used
 by the `OpalePay` backend deployment workflow.
+
+The default memory ceiling is 1.5 GiB, with a 256 MiB database cache and a
+100 MiB mempool. Testnet P2P is bound to loopback by default. Set
+`BITCOIN_P2P_BIND=0.0.0.0` only when inbound peers are explicitly required and
+the host firewall has been reviewed.
 
 ## Configure IFK
 

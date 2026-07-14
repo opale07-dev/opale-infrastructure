@@ -1,6 +1,14 @@
 name: "IFK / Configure Pay bitcoind"
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ifk-bitcoind/**'
+      - 'scripts/apply-ifk-bitcoind.sh'
+      - 'scripts/configure-wireguard.sh'
+      - '.github/workflows/ifk-bitcoind-config.yml'
   workflow_dispatch:
 
 permissions:
@@ -55,7 +63,10 @@ jobs:
           BITCOIN_RPC_USER: ${{ vars.BITCOIN_RPC_USER || secrets.BITCOIN_RPC_USER || 'opale_pay_rpc' }}
           BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
           BITCOIN_PRUNE_MB: ${{ vars.BITCOIN_PRUNE_MB || '550' }}
-          BITCOIN_P2P_BIND: ${{ vars.BITCOIN_P2P_BIND || '0.0.0.0' }}
+          BITCOIN_DB_CACHE_MB: ${{ vars.BITCOIN_DB_CACHE_MB || '256' }}
+          BITCOIN_MAX_MEMPOOL_MB: ${{ vars.BITCOIN_MAX_MEMPOOL_MB || '100' }}
+          BITCOIN_MEMORY_LIMIT: ${{ vars.BITCOIN_MEMORY_LIMIT || '1536m' }}
+          BITCOIN_P2P_BIND: ${{ vars.BITCOIN_P2P_BIND || '127.0.0.1' }}
           BITCOIN_P2P_PORT: ${{ vars.BITCOIN_P2P_PORT || '18333' }}
         run: |
           set -euo pipefail
@@ -82,6 +93,9 @@ jobs:
           append_env BITCOIN_RPC_USER "$BITCOIN_RPC_USER"
           append_env BITCOIN_RPC_PASSWORD "$BITCOIN_RPC_PASSWORD"
           append_env BITCOIN_PRUNE_MB "$BITCOIN_PRUNE_MB"
+          append_env BITCOIN_DB_CACHE_MB "$BITCOIN_DB_CACHE_MB"
+          append_env BITCOIN_MAX_MEMPOOL_MB "$BITCOIN_MAX_MEMPOOL_MB"
+          append_env BITCOIN_MEMORY_LIMIT "$BITCOIN_MEMORY_LIMIT"
           append_env BITCOIN_P2P_BIND "$BITCOIN_P2P_BIND"
           append_env BITCOIN_P2P_PORT "$BITCOIN_P2P_PORT"
 

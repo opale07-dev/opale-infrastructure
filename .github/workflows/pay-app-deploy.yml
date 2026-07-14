@@ -1,0 +1,349 @@
+name: "Pay / App Deploy"
+
+# Layer 3 only: no Terraform. The backend is converged first, then the frontend
+# is deployed beside Vault on Oracle and verified through the shared edge.
+
+on:
+  repository_dispatch:
+    types:
+      - pay-images-published
+  workflow_dispatch:
+    inputs:
+      backend_image_ref:
+        description: "Immutable Pay proxy image, ghcr.io/...@sha256:..."
+        required: true
+        type: string
+      frontend_image_ref:
+        description: "Immutable Pay frontend image, ghcr.io/...@sha256:..."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: pay-app-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy_backend:
+    name: "Deploy Pay backend"
+    runs-on: ubuntu-latest
+    outputs:
+      backend_ip: ${{ steps.target.outputs.ip }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Resolve image reference
+        id: image
+        env:
+          DISPATCH_IMAGE_REF: ${{ github.event.client_payload.backend_image_ref }}
+          INPUT_IMAGE_REF: ${{ inputs.backend_image_ref }}
+        run: |
+          set -euo pipefail
+          IMAGE_REF="${INPUT_IMAGE_REF:-$DISPATCH_IMAGE_REF}"
+          case "$IMAGE_REF" in
+            ghcr.io/opale07-dev/opale-pay-proxy@sha256:*) ;;
+            *) echo "backend_image_ref must be an immutable opale-pay-proxy digest"; exit 1 ;;
+          esac
+          echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight required secrets
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.OPALE_PAY_SSH_PRIVATE_KEY }}
+          BITCOIN_RPC_USER: ${{ secrets.BITCOIN_RPC_USER }}
+          BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.OPALE_PAY_POSTGRES_PASSWORD }}
+          L402_MACAROON_SECRET: ${{ secrets.L402_MACAROON_SECRET }}
+          GHCR_READ_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
+        run: |
+          test -n "$SSH_PRIVATE_KEY" || { echo "Missing OPALE_PAY_SSH_PRIVATE_KEY"; exit 1; }
+          test -n "$BITCOIN_RPC_USER" || { echo "Missing BITCOIN_RPC_USER"; exit 1; }
+          test -n "$BITCOIN_RPC_PASSWORD" || { echo "Missing BITCOIN_RPC_PASSWORD"; exit 1; }
+          test -n "$POSTGRES_PASSWORD" || { echo "Missing OPALE_PAY_POSTGRES_PASSWORD"; exit 1; }
+          test -n "$L402_MACAROON_SECRET" || { echo "Missing L402_MACAROON_SECRET"; exit 1; }
+          test -n "$GHCR_READ_TOKEN" || { echo "Missing OPALE_GLOBAL_PAT"; exit 1; }
+
+      - name: Login to GHCR on runner
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bundle backend image
+        id: bundle
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
+        run: |
+          set -euo pipefail
+          if ! docker pull "$IMAGE_REF"; then
+            printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
+            docker pull "$IMAGE_REF"
+          fi
+          LOCAL_REF="ghcr.io/opale07-dev/opale-pay-proxy:rollout-${GITHUB_RUN_ID}"
+          docker tag "$IMAGE_REF" "$LOCAL_REF"
+          docker save "$LOCAL_REF" | gzip > /tmp/opale-pay-proxy-image.tar.gz
+          echo "local_ref=$LOCAL_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Install OpenStack Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-openstackclient > /dev/null
+
+      - name: Resolve backend VM
+        id: target
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          set -euo pipefail
+          IP="$(openstack server show opale-pay-prod -f json -c addresses \
+            | jq -r '.addresses | to_entries[0].value[] | select(test("^[0-9]+\\."))' | head -n1)"
+          test -n "$IP" || { echo "IPv4 not found for opale-pay-prod"; exit 1; }
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
+      - name: Install SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.OPALE_PAY_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/opale_pay
+          chmod 600 ~/.ssh/opale_pay
+
+      - name: Open temporary SSH access
+        id: ssh_rule
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+        run: |
+          set -euo pipefail
+          RUNNER_CIDR="$(curl -4 -fsS https://api.ipify.org)/32"
+          RULE_ID="$(openstack security group rule create opale-pay-secgroup \
+            --protocol tcp --dst-port 2222:2222 --remote-ip "$RUNNER_CIDR" \
+            -f value -c id)"
+          echo "id=$RULE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Push declared backend state
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_pay"
+          for attempt in $(seq 1 12); do
+            ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" 'true' && break
+            [ "$attempt" -eq 12 ] && { echo "SSH not reachable"; exit 1; }
+            sleep 5
+          done
+          ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" \
+            'sudo mkdir -p /opt/opale-pay && sudo chown -R ubuntu:ubuntu /opt/opale-pay && chmod 750 /opt/opale-pay'
+          scp $SSH_OPTS -P 2222 \
+            deploy/opale-pay/docker-compose.yml \
+            deploy/opale-pay/deploy.sh \
+            deploy/opale-pay/app.env.example \
+            "ubuntu@${TARGET_IP}:/opt/opale-pay/"
+          scp $SSH_OPTS -P 2222 /tmp/opale-pay-proxy-image.tar.gz \
+            "ubuntu@${TARGET_IP}:/tmp/opale-pay-proxy-image.tar.gz"
+
+      - name: Write backend runtime env
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+          PAY_PROXY_IMAGE_REF: ${{ steps.bundle.outputs.local_ref }}
+          BITCOIN_RPC_HOST: ${{ vars.IFK_WG_IP || '10.77.0.1' }}
+          BITCOIN_RPC_PORT: ${{ vars.BITCOIN_RPC_PORT || '18332' }}
+          BITCOIN_RPC_USER: ${{ secrets.BITCOIN_RPC_USER }}
+          BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.OPALE_PAY_POSTGRES_PASSWORD }}
+          LNBITS_WALLET_HEDGE_ADMIN_KEY: ${{ secrets.LNBITS_WALLET_HEDGE_ADMIN_KEY }}
+          LNBITS_WALLET_HEDGE_INVOICE_KEY: ${{ secrets.LNBITS_WALLET_HEDGE_INVOICE_KEY }}
+          L402_MACAROON_SECRET: ${{ secrets.L402_MACAROON_SECRET }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/opale_pay"
+          printf 'PAY_PROXY_IMAGE_REF=%s\n' "$PAY_PROXY_IMAGE_REF" > /tmp/pay-dotenv
+          quote_env() {
+            key="$1"
+            value="$2"
+            escaped="$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+            printf "%s='%s'\n" "$key" "$escaped" >> /tmp/pay-appenv
+          }
+          : > /tmp/pay-appenv
+          quote_env BITCOIN_RPC_HOST "$BITCOIN_RPC_HOST"
+          quote_env BITCOIN_RPC_PORT "$BITCOIN_RPC_PORT"
+          quote_env BITCOIN_RPC_USER "$BITCOIN_RPC_USER"
+          quote_env BITCOIN_RPC_PASSWORD "$BITCOIN_RPC_PASSWORD"
+          quote_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+          quote_env CLN_REST_MACAROON ""
+          quote_env LNBITS_WALLET_HEDGE_ADMIN_KEY "$LNBITS_WALLET_HEDGE_ADMIN_KEY"
+          quote_env LNBITS_WALLET_HEDGE_INVOICE_KEY "$LNBITS_WALLET_HEDGE_INVOICE_KEY"
+          quote_env L402_MACAROON_SECRET "$L402_MACAROON_SECRET"
+          quote_env GEOBLOCK_ENABLED "false"
+          scp $SSH_OPTS -P 2222 /tmp/pay-dotenv "ubuntu@${TARGET_IP}:/opt/opale-pay/.env"
+          scp $SSH_OPTS -P 2222 /tmp/pay-appenv "ubuntu@${TARGET_IP}:/opt/opale-pay/app.env"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${TARGET_IP}" \
+            'chmod 600 /opt/opale-pay/.env /opt/opale-pay/app.env && chmod 750 /opt/opale-pay/deploy.sh'
+          rm -f /tmp/pay-dotenv /tmp/pay-appenv
+
+      - name: Converge and verify backend
+        env:
+          TARGET_IP: ${{ steps.target.outputs.ip }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/opale_pay -p 2222 "ubuntu@${TARGET_IP}" \
+            '/opt/opale-pay/deploy.sh'
+
+      - name: Close temporary SSH access
+        if: always() && steps.ssh_rule.outputs.id != ''
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_USERNAME: ${{ secrets.OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_IDENTITY_API_VERSION: "3"
+          RULE_ID: ${{ steps.ssh_rule.outputs.id }}
+        run: openstack security group rule delete "$RULE_ID" || true
+
+  deploy_frontend:
+    name: "Deploy Pay frontend"
+    runs-on: ubuntu-latest
+    needs: deploy_backend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Resolve image reference
+        id: image
+        env:
+          DISPATCH_IMAGE_REF: ${{ github.event.client_payload.frontend_image_ref }}
+          INPUT_IMAGE_REF: ${{ inputs.frontend_image_ref }}
+        run: |
+          set -euo pipefail
+          IMAGE_REF="${INPUT_IMAGE_REF:-$DISPATCH_IMAGE_REF}"
+          case "$IMAGE_REF" in
+            ghcr.io/opale07-dev/opale-pay-frontend@sha256:*) ;;
+            *) echo "frontend_image_ref must be an immutable opale-pay-frontend digest"; exit 1 ;;
+          esac
+          echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight Oracle values
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          test -n "$ORACLE_VPS_IP" || { echo "Missing ORACLE_VPS_IP"; exit 1; }
+          test -n "$ORACLE_SSH_KEY" || { echo "Missing ORACLE_SSH_KEY"; exit 1; }
+
+      - name: Login to GHCR on runner
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bundle frontend image
+        id: bundle
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
+        run: |
+          set -euo pipefail
+          if ! docker pull "$IMAGE_REF"; then
+            printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
+            docker pull "$IMAGE_REF"
+          fi
+          LOCAL_REF="ghcr.io/opale07-dev/opale-pay-frontend:rollout-${GITHUB_RUN_ID}"
+          docker tag "$IMAGE_REF" "$LOCAL_REF"
+          docker save "$LOCAL_REF" | gzip > /tmp/opale-pay-frontend-image.tar.gz
+          echo "local_ref=$LOCAL_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Install SSH key
+        env:
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/oracle_edge
+          chmod 600 ~/.ssh/oracle_edge
+
+      - name: Push declared frontend state
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" \
+            'sudo mkdir -p /opt/opale-pay-frontend && sudo chown -R ubuntu:ubuntu /opt/opale-pay-frontend'
+          scp $SSH_OPTS -P 2222 deploy/opale-pay-frontend/docker-compose.yml \
+            "ubuntu@${ORACLE_VPS_IP}:/opt/opale-pay-frontend/"
+          scp $SSH_OPTS -P 2222 /tmp/opale-pay-frontend-image.tar.gz \
+            "ubuntu@${ORACLE_VPS_IP}:/tmp/opale-pay-frontend-image.tar.gz"
+
+      - name: Write frontend runtime env
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+          PAY_FRONTEND_IMAGE_REF: ${{ steps.bundle.outputs.local_ref }}
+          BACKEND_IP: ${{ needs.deploy_backend.outputs.backend_ip }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
+          {
+            printf 'PAY_FRONTEND_IMAGE_REF=%s\n' "$PAY_FRONTEND_IMAGE_REF"
+            printf 'OPALE_PAY_BACKEND_URL=http://%s:8080\n' "$BACKEND_IP"
+            printf 'PAY_FRONTEND_HOST_PORT=8445\n'
+          } > /tmp/pay-frontend-dotenv
+          scp $SSH_OPTS -P 2222 /tmp/pay-frontend-dotenv \
+            "ubuntu@${ORACLE_VPS_IP}:/opt/opale-pay-frontend/.env"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" \
+            'chmod 600 /opt/opale-pay-frontend/.env'
+          rm -f /tmp/pay-frontend-dotenv
+
+      - name: Converge frontend and verify through edge
+        env:
+          ORACLE_VPS_IP: ${{ secrets.ORACLE_VPS_IP }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/oracle_edge"
+          ssh $SSH_OPTS -p 2222 "ubuntu@${ORACLE_VPS_IP}" '
+            set -eu
+            cd /opt/opale-pay-frontend
+            sudo docker network inspect opale-edge >/dev/null
+            sudo docker load -i /tmp/opale-pay-frontend-image.tar.gz
+            rm -f /tmp/opale-pay-frontend-image.tar.gz
+            sudo docker compose config --quiet
+            sudo docker compose up -d --remove-orphans --force-recreate
+            attempt=0
+            until curl -fsS http://127.0.0.1:8445/ >/dev/null; do
+              attempt=$((attempt + 1))
+              [ "$attempt" -ge 24 ] && { sudo docker compose logs --tail=100; exit 1; }
+              sleep 5
+            done
+            curl -fsSk --resolve core.gmlabs.ch:443:127.0.0.1 https://core.gmlabs.ch/pay/ >/dev/null
+            curl -fsSk --resolve core.gmlabs.ch:443:127.0.0.1 https://core.gmlabs.ch/pay/api/health \
+              | grep -q '"status":"ok"'
+            echo "Pay frontend and public API are healthy."
+          '

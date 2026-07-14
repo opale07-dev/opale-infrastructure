@@ -1,0 +1,22 @@
+# Canonical production state for the Opale Pay frontend on Oracle.
+
+services:
+  frontend:
+    image: ${PAY_FRONTEND_IMAGE_REF:?PAY_FRONTEND_IMAGE_REF is required in .env}
+    container_name: opale-pay-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PAY_FRONTEND_HOST_PORT:-8445}:80"
+    environment:
+      OPALE_PAY_BACKEND_URL: ${OPALE_PAY_BACKEND_URL:?OPALE_PAY_BACKEND_URL is required}
+    networks:
+      - edge
+    mem_limit: 128m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  edge:
+    external: true
+    name: opale-edge

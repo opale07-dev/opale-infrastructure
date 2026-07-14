@@ -1,6 +1,6 @@
 services:
   bitcoind:
-    image: bitcoin/bitcoin:28.0
+    image: bitcoin/bitcoin@sha256:45002e8f1e4abde81dc92117e91972352b5d2df171126a4a6a827f7eccb10d5b
     container_name: opalepay-ifk-bitcoind
     restart: unless-stopped
     command:
@@ -12,10 +12,12 @@ services:
       - -rpcbind=0.0.0.0
       - -rpcport=${BITCOIN_RPC_PORT:-18332}
       - -prune=${BITCOIN_PRUNE_MB:-550}
+      - -dbcache=${BITCOIN_DB_CACHE_MB:-256}
+      - -maxmempool=${BITCOIN_MAX_MEMPOOL_MB:-100}
       - -assumevalid=0
     ports:
       - "${BITCOIN_RPC_BIND:-127.0.0.1}:${BITCOIN_RPC_PORT:-18332}:${BITCOIN_RPC_PORT:-18332}"
-      - "${BITCOIN_P2P_BIND:-0.0.0.0}:${BITCOIN_P2P_PORT:-18333}:18333"
+      - "${BITCOIN_P2P_BIND:-127.0.0.1}:${BITCOIN_P2P_PORT:-18333}:18333"
     volumes:
       - bitcoin_data:/home/bitcoin/.bitcoin
     healthcheck:
@@ -24,6 +26,11 @@ services:
       timeout: 15s
       start_period: 120s
       retries: 20
+    mem_limit: ${BITCOIN_MEMORY_LIMIT:-1536m}
+    pids_limit: 256
+    stop_grace_period: 2m
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   bitcoin_data:

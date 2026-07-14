@@ -66,6 +66,12 @@ infra-data/
   variables.tf
   outputs.tf
   cloud-init.yaml.tftpl
+deploy/opale-pay/
+  docker-compose.yml
+  app.env.example
+  deploy.sh
+deploy/opale-pay-frontend/
+  docker-compose.yml
 maintenance/                # timers de maintenance (backup, selfcheck, harden)
   opale-maintenance-install.sh
   opale-backup.sh
@@ -80,6 +86,7 @@ scripts/
 .github/workflows/
   vault-infra-deploy.yml
   pay-infra-deploy.yml
+  pay-app-deploy.yml
   data-infra-deploy.yml
   ifk-bitcoind-config.yml
   edge-oracle-deploy.yml
@@ -230,24 +237,33 @@ terraform apply \
 on infrastructure changes because the hardening baseline is embedded into the VM
 `user_data`.
 
-The same workflows can deploy an already-published product image when they
-receive an immutable GHCR digest by manual `workflow_dispatch` input
-`image_ref`, or by `repository_dispatch` event from a product repo:
+Application rollout is handled by separate layer-3 workflows. Product repos
+publish immutable GHCR digests and dispatch the infrastructure repo:
 
 - `vault-image-published`
-- `pay-image-published`
+- `pay-images-published` with `backend_image_ref` and `frontend_image_ref`
 - `data-image-published`
 
-The expected payload is:
+The Pay payload is:
+
+```json
+{
+  "backend_image_ref": "ghcr.io/opale07-dev/opale-pay-proxy@sha256:<digest>",
+  "frontend_image_ref": "ghcr.io/opale07-dev/opale-pay-frontend@sha256:<digest>"
+}
+```
+
+Single-image services use:
 
 ```json
 {"image_ref":"ghcr.io/opale07-dev/<image>@sha256:<digest>"}
 ```
 
-Product repositories must publish the image first. This repo then opens a
-temporary SSH rule for the GitHub runner, logs into GHCR with a read-only token,
-renders `/opt/<service>/docker-compose.yml`, pulls the selected digest, starts
-the container, runs the service healthcheck, and closes the temporary SSH rule.
+Product repositories must publish images first. Pay and Vault pull private
+images on the GitHub runner, transfer a bundle over the temporary SSH path, and
+load it on the target without storing registry credentials on the VM. The
+versioned files under `deploy/<service>/` are copied unchanged and converged
+before service and public-route healthchecks run.
 
 `edge-oracle-deploy.yml` builds and deploys the shared Oracle public proxy as
 an infrastructure-owned artifact.
@@ -257,6 +273,11 @@ it can reach the IFK-hosted `bitcoind` RPC through a private tunnel.
 
 `ifk-bitcoind-config.yml` configures the IFK side of the tunnel and the
 IFK-hosted `bitcoind` runtime from versioned infrastructure artifacts.
+
+`pay-app-deploy.yml` deploys the complete backend stack (CLN, LNbits,
+Postgres, L402 proxy), verifies private Bitcoin RPC and internal service
+connectivity, then deploys the Pay frontend beside Vault on Oracle through the
+shared Caddy/Coraza edge.
 
 The intended delivery boundary is:
 

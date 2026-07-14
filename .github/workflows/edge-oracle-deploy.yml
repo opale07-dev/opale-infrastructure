@@ -42,14 +42,14 @@ jobs:
           context: ./edge-oracle
           file: ./edge-oracle/Dockerfile
           push: true
-          tags: |
-            ghcr.io/opale07-dev/opale-oracle-edge:latest
-            ghcr.io/opale07-dev/opale-oracle-edge:${{ github.sha }}
+          tags: ghcr.io/opale07-dev/opale-oracle-edge:${{ github.sha }}
 
       - name: Export Oracle edge image bundle
         run: |
-          docker pull ghcr.io/opale07-dev/opale-oracle-edge:latest
-          docker save ghcr.io/opale07-dev/opale-oracle-edge:latest | gzip > /tmp/opale-oracle-edge.tar.gz
+          EDGE_IMAGE_REF="ghcr.io/opale07-dev/opale-oracle-edge:${GITHUB_SHA}"
+          docker pull "$EDGE_IMAGE_REF"
+          docker save "$EDGE_IMAGE_REF" | gzip > /tmp/opale-oracle-edge.tar.gz
+          printf 'OPALE_EDGE_IMAGE_REF=%s\n' "$EDGE_IMAGE_REF" > /tmp/opale-edge.env
 
       - name: Copy edge deployment bundle to Oracle VPS
         run: |
@@ -60,6 +60,9 @@ jobs:
             edge-oracle/docker-compose.yml \
             edge-oracle/Caddyfile \
             ubuntu@${{ secrets.ORACLE_VPS_IP }}:/tmp/
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key -P 2222 \
+            /tmp/opale-edge.env \
+            ubuntu@${{ secrets.ORACLE_VPS_IP }}:/tmp/opale-edge.env
           scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key -P 2222 -r \
             edge-oracle/sites \
             ubuntu@${{ secrets.ORACLE_VPS_IP }}:/tmp/
@@ -82,6 +85,7 @@ jobs:
 
             sudo mv /tmp/docker-compose.yml /opt/opale-edge-oracle/docker-compose.yml
             sudo mv /tmp/Caddyfile /opt/opale-edge-oracle/Caddyfile
+            sudo mv /tmp/opale-edge.env /opt/opale-edge-oracle/.env
             sudo rm -rf /opt/opale-edge-oracle/sites
             sudo mv /tmp/sites /opt/opale-edge-oracle/sites
             sudo chown -R ubuntu:ubuntu /opt/opale-edge-oracle
@@ -89,10 +93,15 @@ jobs:
             docker load -i /tmp/opale-oracle-edge.tar.gz
             rm -f /tmp/opale-oracle-edge.tar.gz
 
+            cd /opt/opale-edge-oracle
+            set -a
+            . ./.env
+            set +a
+
             docker run --rm \
               -v /opt/opale-edge-oracle/Caddyfile:/etc/caddy/Caddyfile:ro \
               -v /opt/opale-edge-oracle/sites:/etc/caddy/sites:ro \
-              ghcr.io/opale07-dev/opale-oracle-edge:latest \
+              "$OPALE_EDGE_IMAGE_REF" \
               caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
             # Reprise des ports publics 80/443 : sur ce hote, ils appartiennent
@@ -100,17 +109,28 @@ jobs:
             # (ex: opale-vault-proxy-1 d'avant la migration edge).
             for port in 80 443; do
               docker ps --format '{{.ID}} {{.Names}}' --filter "publish=$port" | while read -r cid cname; do
-                if [ "$cname" != "opale-oracle-edge-proxy" ]; then
-                  echo "Retrait du proxy legacy '$cname' qui occupe le port $port."
-                  docker rm -f "$cid"
-                fi
+                case "$cname" in
+                  opale-oracle-edge-proxy) ;;
+                  opale-vault-proxy-1)
+                    echo "Retrait du proxy Vault legacy '$cname' qui occupe le port $port."
+                    docker rm -f "$cid"
+                    ;;
+                  *)
+                    echo "ERREUR: le conteneur inattendu '$cname' occupe le port $port." >&2
+                    exit 1
+                    ;;
+                esac
               done
             done
 
-            cd /opt/opale-edge-oracle
             docker compose -f docker-compose.yml up -d --remove-orphans
 
             sleep 3
             docker exec opale-oracle-edge-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+            curl -fsSk --resolve core.gmlabs.ch:443:127.0.0.1 https://core.gmlabs.ch/ >/dev/null
+            if docker ps --format '{{.Names}}' | grep -qx opale-pay-frontend; then
+              curl -fsSk --resolve core.gmlabs.ch:443:127.0.0.1 https://core.gmlabs.ch/pay/ >/dev/null
+            fi
 
             echo "Shared Oracle edge deployed."

@@ -1,9 +1,6 @@
 name: "Pay / Infrastructure Deploy"
 
 on:
-  repository_dispatch:
-    types:
-      - pay-image-published
   push:
     branches:
       - main
@@ -12,21 +9,11 @@ on:
       - 'scripts/**'
       - '.github/workflows/pay-infra-deploy.yml'
   workflow_dispatch:
-    inputs:
-      image_ref:
-        description: "Optional immutable GHCR image ref to deploy, e.g. ghcr.io/opale07-dev/opale-pay@sha256:..."
-        required: false
-        default: ""
 
 jobs:
   terraform:
     name: "Automated Deployment (Infomaniak Cloud)"
     runs-on: ubuntu-latest
-    outputs:
-      ip: ${{ steps.target.outputs.ip }}
-      ssh_port: ${{ steps.target.outputs.ssh_port }}
-      ssh_user: ${{ steps.target.outputs.ssh_user }}
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -118,120 +105,4 @@ jobs:
         run: |
           echo "Opale Pay backend VM provisioned at ${{ steps.target.outputs.ip }}"
           echo "SSH target: ${{ steps.target.outputs.ssh_user }}@${{ steps.target.outputs.ip }}:${{ steps.target.outputs.ssh_port }}"
-          echo "Application deployment is handled here by opale-infrastructure when an immutable GHCR image_ref is provided."
-
-  deploy-container:
-    name: "Deploy selected Pay image"
-    runs-on: ubuntu-latest
-    needs: terraform
-    if: >-
-      ${{
-        (github.event_name == 'workflow_dispatch' && inputs.image_ref != '') ||
-        (github.event_name == 'repository_dispatch' && github.event.client_payload.image_ref != '')
-      }}
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Resolve image ref
-        id: image
-        env:
-          DISPATCH_IMAGE_REF: ${{ github.event.client_payload.image_ref }}
-          INPUT_IMAGE_REF: ${{ inputs.image_ref }}
-        run: |
-          set -euo pipefail
-          IMAGE_REF="${INPUT_IMAGE_REF:-$DISPATCH_IMAGE_REF}"
-          case "$IMAGE_REF" in
-            ghcr.io/*@sha256:*) ;;
-            *) echo "image_ref must be an immutable GHCR digest"; exit 1 ;;
-          esac
-          echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
-
-      - name: Preflight deploy secrets
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.OPALE_PAY_SSH_PRIVATE_KEY }}
-          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
-          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
-        run: |
-          test -n "$SSH_PRIVATE_KEY" || { echo "Missing required secret: OPALE_PAY_SSH_PRIVATE_KEY"; exit 1; }
-          test -n "$GHCR_USER" || { echo "Missing required secret: OPALE_GHCR_READ_USER"; exit 1; }
-          test -n "$GHCR_TOKEN" || { echo "Missing required secret: OPALE_GHCR_READ_TOKEN"; exit 1; }
-
-      - name: Install SSH key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.OPALE_PAY_SSH_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/opale_pay
-          chmod 600 ~/.ssh/opale_pay
-
-      - name: Resolve runner SSH CIDR
-        id: runner_ssh_cidr
-        run: |
-          set -euo pipefail
-          echo "cidr=$(curl -fsS https://api.ipify.org)/32" >> "$GITHUB_OUTPUT"
-
-      - name: Install OpenStack Client
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq python3-openstackclient > /dev/null
-
-      - name: Open temporary SSH access from runner
-        id: ssh_rule
-        env:
-          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
-          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
-          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
-          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
-          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
-          OS_USERNAME: ${{ secrets.OS_USERNAME }}
-          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
-          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
-          OS_IDENTITY_API_VERSION: "3"
-          SSH_PORT: ${{ needs.terraform.outputs.ssh_port }}
-          RUNNER_CIDR: ${{ steps.runner_ssh_cidr.outputs.cidr }}
-        run: |
-          set -euo pipefail
-          RULE_ID=$(openstack security group rule create opale-pay-secgroup \
-            --protocol tcp \
-            --dst-port "${SSH_PORT}:${SSH_PORT}" \
-            --remote-ip "$RUNNER_CIDR" \
-            -f value -c id)
-          echo "id=$RULE_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy Pay container
-        env:
-          GHCR_USER: ${{ vars.OPALE_GHCR_READ_USER }}
-          GHCR_TOKEN: ${{ secrets.OPALE_GHCR_READ_TOKEN }}
-        run: |
-          set -euo pipefail
-          scripts/deploy-ghcr-container.sh \
-            --service-name opale-pay \
-            --image-ref '${{ steps.image.outputs.ref }}' \
-            --target-ip '${{ needs.terraform.outputs.ip }}' \
-            --ssh-user '${{ needs.terraform.outputs.ssh_user }}' \
-            --ssh-port '${{ needs.terraform.outputs.ssh_port }}' \
-            --ssh-key ~/.ssh/opale_pay \
-            --app-dir /opt/opale-pay \
-            --host-port 8080 \
-            --container-port 8080 \
-            --health-url http://127.0.0.1:8080/health
-
-      - name: Close temporary SSH access from runner
-        if: always() && steps.ssh_rule.outputs.id != ''
-        env:
-          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
-          OS_PROJECT_ID: ${{ secrets.OS_PROJECT_ID }}
-          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
-          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
-          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
-          OS_USERNAME: ${{ secrets.OS_USERNAME }}
-          OS_PASSWORD: ${{ secrets.OS_PASSWORD }}
-          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
-          OS_IDENTITY_API_VERSION: "3"
-          RULE_ID: ${{ steps.ssh_rule.outputs.id }}
-        run: |
-          set -euo pipefail
-          openstack security group rule delete "$RULE_ID" || true
+          echo "Application rollout is handled separately by Pay / App Deploy."
