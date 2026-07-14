@@ -36,8 +36,9 @@ done
 
 # Existing testnet volumes were initialized with a legacy static password.
 # Converge the database role to the secret injected by this deployment.
-$DOCKER exec -e NEW_PASSWORD="$POSTGRES_PASSWORD" opalepay-postgres sh -c \
-  'psql -U lnbits -d lnbits -v ON_ERROR_STOP=1 -v new_password="$NEW_PASSWORD" -c "ALTER ROLE lnbits WITH PASSWORD :'"'"'new_password'"'"';"' \
+printf '%s\n' "ALTER ROLE lnbits WITH PASSWORD :'new_password';" \
+  | $DOCKER exec -i -e NEW_PASSWORD="$POSTGRES_PASSWORD" opalepay-postgres sh -c \
+    'psql -U lnbits -d lnbits -v ON_ERROR_STOP=1 -v new_password="$NEW_PASSWORD"' \
   >/dev/null
 
 CLN_RUNE=""
