@@ -54,10 +54,45 @@ if [ -n "$CLN_RUNE" ]; then
   sed -i '/^CLN_REST_MACAROON=/d' app.env
   printf "CLN_REST_MACAROON='%s'\n" "$CLN_RUNE" >> app.env
 else
-  echo "CLN rune unavailable: bitcoind or CLN may still be synchronizing."
+  $DOCKER logs --tail 120 opalepay-cln 2>&1 || true
+  echo "CLN rune unavailable: bitcoind or CLN is not ready." >&2
+  exit 1
 fi
 
-compose up -d --remove-orphans --force-recreate lnbits proxy
+compose up -d --remove-orphans --force-recreate lnbits
+
+attempt=0
+until $DOCKER exec opalepay-lnbits python -c \
+  'import httpx; r = httpx.get("http://127.0.0.1:5000/api/v1/health", timeout=5); r.raise_for_status()' \
+  >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 40 ]; then
+    $DOCKER logs --tail 120 opalepay-lnbits 2>&1 || true
+    echo "LNbits did not become ready" >&2
+    exit 1
+  fi
+  sleep 3
+done
+
+wallet_keys="$($DOCKER exec opalepay-postgres psql -U lnbits -d lnbits -Atc \
+  "SELECT adminkey || ':' || inkey FROM wallets WHERE name = 'Opale Pay Service' LIMIT 1;")"
+if [ -z "$wallet_keys" ]; then
+  wallet_json="$($DOCKER exec opalepay-lnbits python -c \
+    'import httpx; r = httpx.post("http://127.0.0.1:5000/api/v1/account", json={"name": "Opale Pay Service"}, timeout=10); r.raise_for_status(); print(r.text)')"
+  wallet_admin_key="$(printf '%s' "$wallet_json" | jq -r '.adminkey // empty')"
+  wallet_invoice_key="$(printf '%s' "$wallet_json" | jq -r '.inkey // empty')"
+else
+  wallet_admin_key="${wallet_keys%%:*}"
+  wallet_invoice_key="${wallet_keys#*:}"
+fi
+
+[ -n "$wallet_admin_key" ] && [ -n "$wallet_invoice_key" ] \
+  || { echo "LNbits wallet bootstrap returned empty keys" >&2; exit 1; }
+sed -i '/^LNBITS_WALLET_HEDGE_ADMIN_KEY=/d;/^LNBITS_WALLET_HEDGE_INVOICE_KEY=/d' app.env
+printf "LNBITS_WALLET_HEDGE_ADMIN_KEY='%s'\n" "$wallet_admin_key" >> app.env
+printf "LNBITS_WALLET_HEDGE_INVOICE_KEY='%s'\n" "$wallet_invoice_key" >> app.env
+
+compose up -d --remove-orphans --force-recreate proxy
 
 attempt=0
 until curl -fsS http://127.0.0.1:8080/health | grep -q '"status":"ok"'; do
