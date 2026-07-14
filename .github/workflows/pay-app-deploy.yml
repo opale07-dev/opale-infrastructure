@@ -72,24 +72,27 @@ jobs:
           BITCOIN_RPC_PASSWORD: ${{ secrets.BITCOIN_RPC_PASSWORD }}
           POSTGRES_PASSWORD: ${{ secrets.OPALE_PAY_POSTGRES_PASSWORD }}
           L402_MACAROON_SECRET: ${{ secrets.L402_MACAROON_SECRET }}
-          GHCR_READ_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           test -n "$SSH_PRIVATE_KEY" || { echo "Missing OPALE_PAY_SSH_PRIVATE_KEY"; exit 1; }
           test -n "$BITCOIN_RPC_USER" || { echo "Missing BITCOIN_RPC_USER"; exit 1; }
           test -n "$BITCOIN_RPC_PASSWORD" || { echo "Missing BITCOIN_RPC_PASSWORD"; exit 1; }
           test -n "$POSTGRES_PASSWORD" || { echo "Missing OPALE_PAY_POSTGRES_PASSWORD"; exit 1; }
           test -n "$L402_MACAROON_SECRET" || { echo "Missing L402_MACAROON_SECRET"; exit 1; }
-          test -n "$GHCR_READ_TOKEN" || { echo "Missing OPALE_GLOBAL_PAT"; exit 1; }
+
+      - name: Login to GHCR on runner
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bundle backend image
         id: bundle
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
-          GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
           for attempt in $(seq 1 12); do
             docker pull "$IMAGE_TAG" && break
             [ "$attempt" -eq 12 ] && { echo "Backend tag is not available in GHCR"; exit 1; }
@@ -276,15 +279,20 @@ jobs:
           test -n "$ORACLE_VPS_IP" || { echo "Missing ORACLE_VPS_IP"; exit 1; }
           test -n "$ORACLE_SSH_KEY" || { echo "Missing ORACLE_SSH_KEY"; exit 1; }
 
+      - name: Login to GHCR on runner
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Bundle frontend image
         id: bundle
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
-          GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
           for attempt in $(seq 1 12); do
             docker pull "$IMAGE_TAG" && break
             [ "$attempt" -eq 12 ] && { echo "Frontend tag is not available in GHCR"; exit 1; }
