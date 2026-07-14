@@ -91,8 +91,13 @@ jobs:
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
+          if ! docker pull "$IMAGE_TAG"; then
+            test -n "$GHCR_FALLBACK_TOKEN" || { echo "Missing OPALE_GLOBAL_PAT fallback"; exit 1; }
+            printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
+          fi
           for attempt in $(seq 1 12); do
             docker pull "$IMAGE_TAG" && break
             [ "$attempt" -eq 12 ] && { echo "Backend tag is not available in GHCR"; exit 1; }
@@ -291,8 +296,13 @@ jobs:
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
+          if ! docker pull "$IMAGE_TAG"; then
+            test -n "$GHCR_FALLBACK_TOKEN" || { echo "Missing OPALE_GLOBAL_PAT fallback"; exit 1; }
+            printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
+          fi
           for attempt in $(seq 1 12); do
             docker pull "$IMAGE_TAG" && break
             [ "$attempt" -eq 12 ] && { echo "Frontend tag is not available in GHCR"; exit 1; }
