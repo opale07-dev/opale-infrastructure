@@ -67,13 +67,6 @@ jobs:
           test -n "$L402_MACAROON_SECRET" || { echo "Missing L402_MACAROON_SECRET"; exit 1; }
           test -n "$GHCR_READ_TOKEN" || { echo "Missing OPALE_GLOBAL_PAT"; exit 1; }
 
-      - name: Login to GHCR on runner
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Bundle backend image
         id: bundle
         env:
@@ -81,10 +74,12 @@ jobs:
           GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
-          if ! docker pull "$IMAGE_REF"; then
-            printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
-            docker pull "$IMAGE_REF"
-          fi
+          printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
+          for attempt in $(seq 1 12); do
+            docker pull "$IMAGE_REF" && break
+            [ "$attempt" -eq 12 ] && { echo "Backend digest is not available in GHCR"; exit 1; }
+            sleep 5
+          done
           LOCAL_REF="ghcr.io/opale07-dev/opale-pay-proxy:rollout-${GITHUB_RUN_ID}"
           docker tag "$IMAGE_REF" "$LOCAL_REF"
           docker save "$LOCAL_REF" | gzip > /tmp/opale-pay-proxy-image.tar.gz
@@ -258,13 +253,6 @@ jobs:
           test -n "$ORACLE_VPS_IP" || { echo "Missing ORACLE_VPS_IP"; exit 1; }
           test -n "$ORACLE_SSH_KEY" || { echo "Missing ORACLE_SSH_KEY"; exit 1; }
 
-      - name: Login to GHCR on runner
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Bundle frontend image
         id: bundle
         env:
@@ -272,10 +260,12 @@ jobs:
           GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
-          if ! docker pull "$IMAGE_REF"; then
-            printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
-            docker pull "$IMAGE_REF"
-          fi
+          printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
+          for attempt in $(seq 1 12); do
+            docker pull "$IMAGE_REF" && break
+            [ "$attempt" -eq 12 ] && { echo "Frontend digest is not available in GHCR"; exit 1; }
+            sleep 5
+          done
           LOCAL_REF="ghcr.io/opale07-dev/opale-pay-frontend:rollout-${GITHUB_RUN_ID}"
           docker tag "$IMAGE_REF" "$LOCAL_REF"
           docker save "$LOCAL_REF" | gzip > /tmp/opale-pay-frontend-image.tar.gz
