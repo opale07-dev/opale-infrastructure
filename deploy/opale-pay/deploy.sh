@@ -21,25 +21,26 @@ compose() {
 }
 
 compose config --quiet
-$DOCKER load -i /tmp/opale-pay-proxy-image.tar.gz
-rm -f /tmp/opale-pay-proxy-image.tar.gz
-
-compose pull cln lnbits postgres
-
 blockchain_info="$(curl -fsS --max-time 30 \
   --user "$BITCOIN_RPC_USER:$BITCOIN_RPC_PASSWORD" \
   --header "content-type: text/plain;" \
   --data-binary '{"jsonrpc":"1.0","id":"opale-pay-ci","method":"getblockchaininfo","params":[]}' \
   "http://${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}/")"
 if [ "$(printf '%s' "$blockchain_info" | jq -r '.result.initialblockdownload')" != "false" ]; then
-  compose stop cln lnbits proxy >/dev/null 2>&1 || true
+  rm -f /tmp/opale-pay-proxy-image.tar.gz
+  compose stop
   progress="$(printf '%s' "$blockchain_info" | jq -r '.result.verificationprogress // 0')"
   blocks="$(printf '%s' "$blockchain_info" | jq -r '.result.blocks // 0')"
   headers="$(printf '%s' "$blockchain_info" | jq -r '.result.headers // 0')"
+  compose ps
   echo "bitcoind IBD is still running (progress=${progress}, blocks=${blocks}, headers=${headers}); Pay services remain stopped." >&2
   exit 1
 fi
 
+$DOCKER load -i /tmp/opale-pay-proxy-image.tar.gz
+rm -f /tmp/opale-pay-proxy-image.tar.gz
+
+compose pull cln lnbits postgres
 compose up -d --remove-orphans postgres cln
 
 attempt=0
