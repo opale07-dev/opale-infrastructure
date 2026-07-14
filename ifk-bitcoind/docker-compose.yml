@@ -14,7 +14,6 @@ services:
       - -prune=${BITCOIN_PRUNE_MB:-550}
       - -dbcache=${BITCOIN_DB_CACHE_MB:-256}
       - -maxmempool=${BITCOIN_MAX_MEMPOOL_MB:-100}
-      - -assumevalid=0
     ports:
       - "${BITCOIN_RPC_BIND:-127.0.0.1}:${BITCOIN_RPC_PORT:-18332}:${BITCOIN_RPC_PORT:-18332}"
       - "${BITCOIN_P2P_BIND:-127.0.0.1}:${BITCOIN_P2P_PORT:-18333}:18333"
@@ -26,7 +25,7 @@ services:
       timeout: 15s
       start_period: 120s
       retries: 20
-    mem_limit: ${BITCOIN_MEMORY_LIMIT:-1536m}
+    mem_limit: ${BITCOIN_MEMORY_LIMIT:-2560m}
     pids_limit: 256
     stop_grace_period: 2m
     logging:
