@@ -13,8 +13,16 @@ on:
         description: "Immutable Pay proxy image, ghcr.io/...@sha256:..."
         required: true
         type: string
+      backend_image_tag:
+        description: "Pay proxy publication tag, ghcr.io/...:sha-<commit>"
+        required: true
+        type: string
       frontend_image_ref:
         description: "Immutable Pay frontend image, ghcr.io/...@sha256:..."
+        required: true
+        type: string
+      frontend_image_tag:
+        description: "Pay frontend publication tag, ghcr.io/...:sha-<commit>"
         required: true
         type: string
 
@@ -42,14 +50,20 @@ jobs:
         env:
           DISPATCH_IMAGE_REF: ${{ github.event.client_payload.backend_image_ref }}
           INPUT_IMAGE_REF: ${{ inputs.backend_image_ref }}
+          DISPATCH_IMAGE_TAG: ${{ github.event.client_payload.backend_image_tag }}
+          INPUT_IMAGE_TAG: ${{ inputs.backend_image_tag }}
         run: |
           set -euo pipefail
           IMAGE_REF="${INPUT_IMAGE_REF:-$DISPATCH_IMAGE_REF}"
+          IMAGE_TAG="${INPUT_IMAGE_TAG:-$DISPATCH_IMAGE_TAG}"
           case "$IMAGE_REF" in
             ghcr.io/opale07-dev/opale-pay-proxy@sha256:*) ;;
             *) echo "backend_image_ref must be an immutable opale-pay-proxy digest"; exit 1 ;;
           esac
+          [[ "$IMAGE_TAG" =~ ^ghcr\.io/opale07-dev/opale-pay-proxy:sha-[0-9a-f]{40}$ ]] \
+            || { echo "backend_image_tag must be an opale-pay-proxy SHA tag"; exit 1; }
           echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Preflight required secrets
         env:
@@ -71,17 +85,20 @@ jobs:
         id: bundle
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
           GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
           printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
           for attempt in $(seq 1 12); do
-            docker pull "$IMAGE_REF" && break
-            [ "$attempt" -eq 12 ] && { echo "Backend digest is not available in GHCR"; exit 1; }
+            docker pull "$IMAGE_TAG" && break
+            [ "$attempt" -eq 12 ] && { echo "Backend tag is not available in GHCR"; exit 1; }
             sleep 5
           done
+          docker inspect --format '{{join .RepoDigests "\n"}}' "$IMAGE_TAG" | grep -Fx "$IMAGE_REF" \
+            || { echo "Backend tag does not match dispatched digest"; exit 1; }
           LOCAL_REF="ghcr.io/opale07-dev/opale-pay-proxy:rollout-${GITHUB_RUN_ID}"
-          docker tag "$IMAGE_REF" "$LOCAL_REF"
+          docker tag "$IMAGE_TAG" "$LOCAL_REF"
           docker save "$LOCAL_REF" | gzip > /tmp/opale-pay-proxy-image.tar.gz
           echo "local_ref=$LOCAL_REF" >> "$GITHUB_OUTPUT"
 
@@ -236,14 +253,20 @@ jobs:
         env:
           DISPATCH_IMAGE_REF: ${{ github.event.client_payload.frontend_image_ref }}
           INPUT_IMAGE_REF: ${{ inputs.frontend_image_ref }}
+          DISPATCH_IMAGE_TAG: ${{ github.event.client_payload.frontend_image_tag }}
+          INPUT_IMAGE_TAG: ${{ inputs.frontend_image_tag }}
         run: |
           set -euo pipefail
           IMAGE_REF="${INPUT_IMAGE_REF:-$DISPATCH_IMAGE_REF}"
+          IMAGE_TAG="${INPUT_IMAGE_TAG:-$DISPATCH_IMAGE_TAG}"
           case "$IMAGE_REF" in
             ghcr.io/opale07-dev/opale-pay-frontend@sha256:*) ;;
             *) echo "frontend_image_ref must be an immutable opale-pay-frontend digest"; exit 1 ;;
           esac
+          [[ "$IMAGE_TAG" =~ ^ghcr\.io/opale07-dev/opale-pay-frontend:sha-[0-9a-f]{40}$ ]] \
+            || { echo "frontend_image_tag must be an opale-pay-frontend SHA tag"; exit 1; }
           echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Preflight Oracle values
         env:
@@ -257,17 +280,20 @@ jobs:
         id: bundle
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
           GHCR_FALLBACK_TOKEN: ${{ secrets.OPALE_GLOBAL_PAT }}
         run: |
           set -euo pipefail
           printf '%s' "$GHCR_FALLBACK_TOKEN" | docker login ghcr.io -u opale07-dev --password-stdin
           for attempt in $(seq 1 12); do
-            docker pull "$IMAGE_REF" && break
-            [ "$attempt" -eq 12 ] && { echo "Frontend digest is not available in GHCR"; exit 1; }
+            docker pull "$IMAGE_TAG" && break
+            [ "$attempt" -eq 12 ] && { echo "Frontend tag is not available in GHCR"; exit 1; }
             sleep 5
           done
+          docker inspect --format '{{join .RepoDigests "\n"}}' "$IMAGE_TAG" | grep -Fx "$IMAGE_REF" \
+            || { echo "Frontend tag does not match dispatched digest"; exit 1; }
           LOCAL_REF="ghcr.io/opale07-dev/opale-pay-frontend:rollout-${GITHUB_RUN_ID}"
-          docker tag "$IMAGE_REF" "$LOCAL_REF"
+          docker tag "$IMAGE_TAG" "$LOCAL_REF"
           docker save "$LOCAL_REF" | gzip > /tmp/opale-pay-frontend-image.tar.gz
           echo "local_ref=$LOCAL_REF" >> "$GITHUB_OUTPUT"
 
