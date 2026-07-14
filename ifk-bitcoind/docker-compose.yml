@@ -29,6 +29,11 @@ services:
     mem_limit: ${BITCOIN_MEMORY_LIMIT:-1536m}
     pids_limit: 256
     stop_grace_period: 2m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     security_opt:
       - no-new-privileges:true
 

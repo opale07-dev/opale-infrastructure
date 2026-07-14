@@ -51,6 +51,7 @@ require_file "$ENV_FILE"
 require_file "$COMPOSE_FILE"
 require_executable "$WG_CONFIGURATOR"
 require_command docker
+require_command python3
 docker compose version >/dev/null
 
 install -d -m 0750 -o root -g ubuntu /etc/opale
@@ -88,5 +89,36 @@ if command -v ufw >/dev/null 2>&1; then
 fi
 
 cd "$APP_DIR"
+
+volume_name="$(docker volume ls -q \
+  --filter label=com.docker.compose.project=ifk-bitcoind \
+  --filter label=com.docker.compose.volume=bitcoin_data | head -n 1)"
+if [ -n "$volume_name" ]; then
+  volume_path="$(docker volume inspect -f '{{.Mountpoint}}' "$volume_name")"
+  settings_file="${volume_path}/testnet3/settings.json"
+  if [ -f "$settings_file" ] && ! python3 -m json.tool "$settings_file" >/dev/null 2>&1; then
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop bitcoind >/dev/null 2>&1 || true
+    if ! python3 -m json.tool "$settings_file" >/dev/null 2>&1; then
+      backup="${settings_file}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+      mv "$settings_file" "$backup"
+      echo "Moved invalid Bitcoin settings to $backup"
+    fi
+  fi
+fi
+
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
+
+attempt=1
+while [ "$attempt" -le 60 ]; do
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' opalepay-ifk-bitcoind 2>/dev/null || true)"
+  if [ "$health" = "healthy" ]; then
+    exit 0
+  fi
+  sleep 5
+  attempt=$((attempt + 1))
+done
+
+docker logs --tail 100 opalepay-ifk-bitcoind 2>&1 || true
+echo "bitcoind did not become healthy within 5 minutes"
+exit 1
